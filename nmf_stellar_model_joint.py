@@ -287,14 +287,14 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
 
 
-def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
+def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std,
                  n_iter=2000, learning_rate=0.05, seed=42):
     """
     Infer stellar labels from spectra using a trained model.
-    
+
     Given a trained model (theta, H, scatter) and new spectra (flux, ivar),
     optimize only the stellar labels while keeping the model fixed.
-    
+
     Parameters:
     -----------
     flux : array (n_stars, n_wavelengths)
@@ -315,7 +315,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
         Number of optimization iterations
     learning_rate : float
         Learning rate for Adam optimizer
-        
+
     Returns:
     --------
     labels : array (n_stars, 4)
@@ -323,9 +323,9 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
     """
     n_stars, n_wavelengths = flux.shape
     n_labels = len(label_mean)
-    
+
     print(f"Inferring labels for {n_stars} stars...")
-    
+
     # Convert to JAX arrays
     flux_jnp = jnp.array(flux)
     var_jnp = 1.0 / jnp.maximum(ivar, 1e-16)
@@ -334,13 +334,13 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
     scatter_sq = jnp.array(scatter)**2
     label_mean_jnp = jnp.array(label_mean)
     label_std_jnp = jnp.array(label_std)
-    
+
     # Initialize labels at mean (standardized = 0)
     np.random.seed(seed)
-    init_labels_std = np.random.randn(n_stars, n_labels) * 0.1
-    
+    #init_labels_std = np.random.randn(n_stars, n_labels) * 0.1
+
     params = {'labels_std': jnp.array(init_labels_std)}
-    
+
     @jit
     def forward(params):
         """Compute predicted flux from labels."""
@@ -349,7 +349,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
         W = jnp.maximum(design_matrix @ theta_jnp, 0)
         pred_flux = 1.0 - W @ H_jnp
         return pred_flux
-    
+
     @jit
     def loss_fn(params):
         """Compute weighted reconstruction loss."""
@@ -357,62 +357,62 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter,
         total_var = var_jnp + scatter_sq
         chi_sq = (flux_jnp - pred_flux)**2 / total_var
         return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
-    
+
     @jit
     def loss_and_grad(params):
         return jax.value_and_grad(loss_fn)(params)
-    
+
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
-    
+
     @jit
     def update_step(params, opt_state):
         loss, grads = loss_and_grad(params)
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         return params, opt_state, loss
-    
+
     with tqdm(total=n_iter) as pb:
         for i in range(n_iter):
             params, opt_state, loss = update_step(params, opt_state)
             pb.set_description(f"loss = {float(loss):.4e}")
             pb.update()
-    
+
     # Convert back to physical labels
     labels_std_final = np.array(params['labels_std'])
     labels_final = labels_std_final * label_std + label_mean
-    
+
     return labels_final
 
 
 def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
     """Create comparison plots of true vs inferred labels for test set."""
     n_labels = true_labels.shape[1]
-    
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
     axes = axes.ravel()
-    
+
     label_bounds = {
         'teff': (3500, 7500),
         'logg': (0.5, 5.5),
         'm_h': (-2.5, 0.75),
         'alpha_h': (-0.5, 0.6)
     }
-    
+
     for i, (ax, name) in enumerate(zip(axes, label_names)):
         true_vals = true_labels[:, i]
         inferred_vals = inferred_labels[:, i]
-        
+
         diff = inferred_vals - true_vals
         bias = np.nanmedian(diff)
         scatter = np.nanstd(diff)
         mad = np.nanmedian(np.abs(diff - bias))
-        
+
         ax.scatter(true_vals, inferred_vals, alpha=0.5, s=10, c='steelblue', edgecolors='none')
-        
+
         bounds = label_bounds.get(name, (np.nanmin(true_vals), np.nanmax(true_vals)))
         ax.plot(bounds, bounds, 'r-', lw=2, label='1:1')
-        
+
         ax.set_xlabel(f'True {name}', fontsize=12)
         ax.set_ylabel(f'Inferred {name}', fontsize=12)
         ax.set_xlim(bounds)
@@ -421,7 +421,7 @@ def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
         ax.grid(True, alpha=0.3)
         ax.set_aspect('equal')
         ax.legend(loc='upper left')
-    
+
     plt.suptitle('Test Set: True vs Inferred Labels', fontsize=14, y=1.02)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -729,53 +729,54 @@ if __name__ == '__main__':
              stats=stats)
 
     print(f"  Saved to {output_dir}/")
-    
+
     # =========================================================================
     # TEST STEP: Infer labels from spectra alone (no known labels)
     # =========================================================================
     print("\n" + "=" * 60)
     print("Test Step: Inferring labels from spectra (no known labels)")
     print("=" * 60)
-    
+
     # Use all data as "test" - pretend we don't know the labels
     # In practice you'd use a held-out test set
     test_flux = flux
     test_ivar = ivar
     test_true_labels = true_labels
-    
+
     print(f"Test set: {len(test_flux)} spectra")
     print("Inferring labels using trained model (theta, H fixed)...")
-    
+
     # Infer labels using only flux and ivar
     test_inferred_labels = infer_labels(
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
+        (test_true_labels - label_mean) / label_std,
         n_iter=3000,
         learning_rate=0.05
     )
-    
+
     # Compute test statistics
     test_stats = compute_label_statistics(test_true_labels, test_inferred_labels, label_names)
-    
+
     print("\n" + "=" * 60)
     print("Test Set Statistics")
     print("=" * 60)
     for name in label_names:
         s = test_stats[name]
         print(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
-    
+
     # Plot test results: true vs inferred
     print("\nGenerating test comparison plot...")
     plot_test_comparison(
         test_true_labels, test_inferred_labels, label_names,
         f'{output_dir}/test_true_vs_inferred.png'
     )
-    
+
     # Save test results
     np.savez(f'{output_dir}/test_inference_results.npz',
              test_true_labels=test_true_labels,
              test_inferred_labels=test_inferred_labels,
              test_stats=test_stats)
     print(f"Saved test results to {output_dir}/test_inference_results.npz")
-    
+
     print("\nDone!")
