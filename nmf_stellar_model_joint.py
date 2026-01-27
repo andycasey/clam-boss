@@ -278,12 +278,13 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     labels_final = labels_std_final * label_std + label_mean
     theta_final = np.array(params['theta'])
     H_final = np.exp(np.array(params['log_H']))
+    scatter = np.exp(np.array(params['ln_scatter']))
 
     # Compute final W
     design_matrix_final = build_design_matrix_np(labels_std_final)
     W_final = np.maximum(design_matrix_final @ theta_final, 0)
 
-    return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses
+    return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
 
 
 def compute_label_statistics(true_labels, inferred_labels, label_names):
@@ -393,6 +394,23 @@ def plot_loss(losses, save_path):
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved loss plot to {save_path}")
+
+def plot_model_scatter(wavelength, scatter, save_path):
+    """
+        f'{output_dir}/model_scatter.png'
+    )
+    """
+
+    fig, ax = plt.subplots()
+    ax.plot(wavelength, scatter, 'k-', lw=1.0)
+    ax.set_xlabel('Wavelength (A)')
+    ax.set_ylabel('Model Scatter')
+    ax.set_ylim(0, 0.1)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close("all")
+    print(f"Saved model scatter plot to {save_path}")
+
 
 
 def plot_spectra_comparison(flux, ivar, true_labels, inferred_labels,
@@ -513,7 +531,7 @@ if __name__ == '__main__':
 
     # Joint optimization
     print("\n[2/4] Running joint optimization...")
-    inferred_labels, theta, H, W, label_mean, label_std, losses = joint_optimization(
+    inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
         flux, ivar, true_labels, K,
         n_iter=n_iter,
         learning_rate=learning_rate,
@@ -548,6 +566,10 @@ if __name__ == '__main__':
         flux, ivar, true_labels, inferred_labels,
         theta, H, label_mean, label_std, wavelength,
         f'{output_dir}/spectra_comparison.png', n_plot=20
+    )
+    plot_model_scatter(
+        wavelength, scatter,
+        f'{output_dir}/model_scatter.png'
     )
 
     # Save results
