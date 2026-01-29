@@ -22,6 +22,7 @@ from matplotlib.colors import LogNorm
 import warnings
 from tqdm import tqdm
 from sklearn.decomposition import NMF
+from diagnostic_plots import plot_chi_sq_diagnostic_batch
 
 jax.config.update("jax_enable_x64", True)
 
@@ -1006,6 +1007,21 @@ if __name__ == '__main__':
                   label_names,
                   output_dir,
                   convert_alpha)
+    
+    # Create diagnostic plots for a few random stars
+    np.random.seed(42)
+    indices = np.random.choice(len(flux), size=5, replace=False)
+    
+    diag_output_dir = 'diagnostic_plots'
+    plot_chi_sq_diagnostic_batch(
+        test_flux, test_ivar, test_inferred_labels,
+        theta, H, label_mean, label_std, scatter,
+        output_dir=diag_output_dir,
+        indices=indices,
+        wavelength=wavelength,
+        n_grid=25,
+        delta_std=2.5
+    )
 
     # Save test results
     np.savez(f'{output_dir}/test_inference_results.npz',
