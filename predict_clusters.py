@@ -90,8 +90,6 @@ def plot_cluster_results(test_inferred_labels,
 
 
 if __name__ == '__main__':
-    rng = np.random.default_rng(seed=42)
-
     # Configuration
     data_file = 'boss_cluster_stars_data.npz'
     K = 32
@@ -120,17 +118,14 @@ if __name__ == '__main__':
     label_mean = res['label_mean']
     label_std = res['label_std']
     scatter = res['scatter']
-    init_labels_std = rng.normal(0,
-                                 1,
-                                 size=(n_stars, len(label_mean)))
-
-    # Infer labels using only flux and ivar
+    # Infer labels using BFGS with grid search initialization
     test_inferred_labels = infer_labels(
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
-        init_labels_std,
-        n_iter=30000,
-        learning_rate=0.05
+        init_labels_std=None,  # triggers grid search
+        n_iter=1000,
+        optimizer='bfgs',
+        grid_points=5
     )
 
     # Wavelength grid
