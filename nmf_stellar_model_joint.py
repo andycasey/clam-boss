@@ -374,54 +374,58 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
 
     # Grid search to find initial values if not provided
     if init_labels_std is None:
-        print(f"  Performing grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
-
-        # Build grid
+        print(f"  Performing vectorized grid search...")
+        
         grid_1d = np.linspace(grid_range[0], grid_range[1], grid_points)
-        grid_points_all = np.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
-        n_grid = len(grid_points_all)
-
-        init_labels_std = np.zeros((n_stars, n_labels))
-
-        for i in tqdm(range(n_stars), desc="Grid search"):
-            flux_i = jnp.array(flux[i])
-            var_i = jnp.array(1.0 / np.maximum(ivar[i], 1e-16))
-
-            best_loss = np.inf
-            best_point = grid_points_all[0]
-
-            for grid_point in grid_points_all:
-                loss_val = float(single_star_loss(jnp.array(grid_point), flux_i, var_i))
-                if loss_val < best_loss:
-                    best_loss = loss_val
-                    best_point = grid_point
-
-            init_labels_std[i] = best_point
-
+        grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))
+        
+        @jit
+        def grid_search_star(flux_single, var_single):
+            """Find best grid point for a single star."""
+            losses = vmap(lambda pt: single_star_loss(pt, flux_single, var_single))(
+                grid_points_all
+            )
+            return grid_points_all[jnp.argmin(losses)]
+        
+        # Vectorize over all stars - runs on GPU
+        init_labels_std = vmap(grid_search_star)(flux_jnp, var_jnp)
+        init_labels_std = np.array(init_labels_std)
         print(f"  Grid search complete.")
 
     if optimizer == 'bfgs':
-        # BFGS optimization for each star independently
-        print(f"  Running L-BFGS-B optimization...")
+        # GPU-accelerated BFGS using jaxopt (10-100x faster)
+        try:
+            import jaxopt
+        except ImportError:
+            raise ImportError("Install jaxopt: pip install jaxopt")
+        
+        print(f"  Running L-BFGS-B optimization (GPU-accelerated)...")
         labels_std_final = np.zeros((n_stars, n_labels))
-
-        for i in tqdm(range(n_stars), desc="BFGS"):
-            flux_i = jnp.array(flux[i])
-            var_i = jnp.array(1.0 / np.maximum(ivar[i], 1e-16))
-            x0 = init_labels_std[i]
-
-            def objective(x):
-                loss, grad = single_star_loss_and_grad(jnp.array(x), flux_i, var_i)
-                return float(loss), np.array(grad)
-
-            result = minimize(
-                objective,
-                x0,
-                method='L-BFGS-B',
-                jac=True,
-                options={'maxiter': n_iter, 'disp': False}
+        
+        # Create solver
+        solver = jaxopt.LBFGS(fun=single_star_loss, maxiter=n_iter, tol=1e-6)
+        
+        # Batch size - adjust based on GPU memory (100 is safe for most GPUs)
+        batch_size = 100
+        n_batches = (n_stars + batch_size - 1) // batch_size
+        
+        @jit
+        def optimize_batch(init_batch, flux_batch, var_batch):
+            def optimize_single(init_single, flux_single, var_single):
+                result = solver.run(init_single, flux_single, var_single)
+                return result.params
+            return vmap(optimize_single)(init_batch, flux_batch, var_batch)
+        
+        for i in tqdm(range(n_batches), desc="BFGS batches"):
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, n_stars)
+            
+            batch_result = optimize_batch(
+                jnp.array(init_labels_std[start_idx:end_idx]),
+                flux_jnp[start_idx:end_idx],
+                var_jnp[start_idx:end_idx]
             )
-            labels_std_final[i] = result.x
+            labels_std_final[start_idx:end_idx] = np.array(batch_result)
 
     else:  # adam
         # Batch Adam optimization (original behavior)
