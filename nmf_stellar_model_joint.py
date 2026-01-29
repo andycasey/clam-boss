@@ -962,10 +962,11 @@ if __name__ == '__main__':
     test_inferred_labels = infer_labels(
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
-        init_labels_std=(test_true_labels - label_mean) / label_std,
-        n_iter=3000,
-        learning_rate=0.05,
-        optimizer='adam'
+        init_labels_std=None,
+        n_iter=1000,
+        optimizer='bfgs',
+        grid_points=10,
+        grid_range=(-5.0, 5.0)
     )
 
     # Compute test statistics
