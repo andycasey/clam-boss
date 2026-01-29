@@ -97,11 +97,16 @@ if __name__ == '__main__':
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
 
-    save_dir = 'nmf_joint_results_with_scatter_K32'
-    label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-
+    convert_alpha = False
+    if convert_alpha:
+        label_names = ['teff', 'logg', 'm_h', 'alpha_h']
+        save_dir = 'nmf_joint_results_with_scatter_K32'
+        output_dir = 'boss_cluster_validation'
+    else:
+        label_names = ['teff', 'logg', 'm_h', 'alpha_m']
+        save_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
+        output_dir = 'boss_cluster_validation_alpha_m'
     # Create output directory
-    output_dir = 'boss_cluster_validation'
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
 
