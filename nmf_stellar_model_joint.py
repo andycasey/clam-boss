@@ -987,22 +987,22 @@ if __name__ == '__main__':
     )
 
     # kiel diagram
-    kiel_diagram(true_labels,
-                 inferred_labels,
+    kiel_diagram(test_true_labels,
+                 test_inferred_labels,
                  label_names,
                  output_dir,
                  fe_h=False)
 
     # keil diagram with Fe/H
-    kiel_diagram(true_labels,
-                 inferred_labels,
+    kiel_diagram(test_true_labels,
+                 test_inferred_labels,
                  label_names,
                  output_dir,
                  fe_h=True)
 
     # alpha/M vs Fe/H
-    alpha_fe_plot(true_labels,
-                  inferred_labels,
+    alpha_fe_plot(test_true_labels,
+                  test_inferred_labels,
                   label_names,
                   output_dir,
                   convert_alpha)
