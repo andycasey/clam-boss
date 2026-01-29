@@ -858,7 +858,7 @@ if __name__ == '__main__':
     n_iter = 10_000
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
-    convert_alpha = False  # if True, convert to alpha/h
+    convert_alpha = True  # if True, convert to alpha/h
 
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']

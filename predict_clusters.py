@@ -97,7 +97,7 @@ if __name__ == '__main__':
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
 
-    convert_alpha = False
+    convert_alpha = True
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
         save_dir = 'nmf_joint_results_with_scatter_K32'
