@@ -938,7 +938,8 @@ if __name__ == '__main__':
              label_std=label_std,
              losses=losses,
              scatter=scatter,
-             stats=stats)
+             stats=stats,
+             convert_alpha=convert_alpha)
 
     print(f"  Saved to {output_dir}/")
 
