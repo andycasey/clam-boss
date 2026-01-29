@@ -287,8 +287,9 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
 
 
-def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std,
-                 n_iter=2000, learning_rate=0.05, seed=42):
+def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std=None,
+                 n_iter=2000, learning_rate=0.05, seed=42, optimizer='adam',
+                 grid_points=5, grid_range=(-3.0, 3.0)):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -311,20 +312,35 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         Label stds for standardization
     scatter : array (n_wavelengths,)
         Model scatter per wavelength
+    init_labels_std : array (n_stars, 4) or None
+        Initial standardized labels. If None, performs grid search to find
+        best starting point for each spectrum.
     n_iter : int
-        Number of optimization iterations
+        Number of optimization iterations (for Adam) or max iterations (for BFGS)
     learning_rate : float
-        Learning rate for Adam optimizer
+        Learning rate for Adam optimizer (ignored for BFGS)
+    seed : int
+        Random seed
+    optimizer : str
+        Optimization method: 'adam' or 'bfgs'
+    grid_points : int
+        Number of grid points per dimension for initial grid search
+        (only used when init_labels_std is None)
+    grid_range : tuple
+        (min, max) range in standardized coordinates for grid search
 
     Returns:
     --------
     labels : array (n_stars, 4)
         Inferred stellar labels (teff, logg, m_h, alpha_h)
     """
+    from scipy.optimize import minimize
+    from itertools import product
+
     n_stars, n_wavelengths = flux.shape
     n_labels = len(label_mean)
 
-    print(f"Inferring labels for {n_stars} stars...")
+    print(f"Inferring labels for {n_stars} stars using {optimizer.upper()}...")
 
     # Convert to JAX arrays
     flux_jnp = jnp.array(flux)
@@ -332,54 +348,115 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     theta_jnp = jnp.array(theta)
     H_jnp = jnp.array(H)
     scatter_sq = jnp.array(scatter)**2
-    label_mean_jnp = jnp.array(label_mean)
-    label_std_jnp = jnp.array(label_std)
 
-    # Initialize labels at mean (standardized = 0)
-    np.random.seed(seed)
-    #init_labels_std = np.random.randn(n_stars, n_labels) * 0.1
-
-    params = {'labels_std': jnp.array(init_labels_std)}
-
+    # Single-star loss function for grid search and BFGS
     @jit
-    def forward(params):
-        """Compute predicted flux from labels."""
-        labels_std = params['labels_std']
-        design_matrix = build_design_matrix_batch_jax(labels_std)
-        W = jnp.maximum(design_matrix @ theta_jnp, 0)
+    def single_star_loss(labels_std_single, flux_single, var_single):
+        """Compute loss for a single star."""
+        design_vec = build_design_matrix_jax(labels_std_single)
+        W = jnp.maximum(design_vec @ theta_jnp, 0)
         pred_flux = 1.0 - W @ H_jnp
-        return pred_flux
+        total_var = var_single + scatter_sq
+        chi_sq = (flux_single - pred_flux)**2 / total_var
+        return 0.5 * jnp.sum(chi_sq)
 
-    @jit
-    def loss_fn(params):
-        """Compute weighted reconstruction loss."""
-        pred_flux = forward(params)
-        total_var = var_jnp + scatter_sq
-        chi_sq = (flux_jnp - pred_flux)**2 / total_var
-        return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
+    single_star_loss_and_grad = jit(jax.value_and_grad(single_star_loss))
 
-    @jit
-    def loss_and_grad(params):
-        return jax.value_and_grad(loss_fn)(params)
+    # Grid search to find initial values if not provided
+    if init_labels_std is None:
+        print(f"  Performing grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
 
-    optimizer = optax.adam(learning_rate)
-    opt_state = optimizer.init(params)
+        # Build grid
+        grid_1d = np.linspace(grid_range[0], grid_range[1], grid_points)
+        grid_points_all = np.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
+        n_grid = len(grid_points_all)
 
-    @jit
-    def update_step(params, opt_state):
-        loss, grads = loss_and_grad(params)
-        updates, opt_state = optimizer.update(grads, opt_state, params)
-        params = optax.apply_updates(params, updates)
-        return params, opt_state, loss
+        init_labels_std = np.zeros((n_stars, n_labels))
 
-    with tqdm(total=n_iter) as pb:
-        for i in range(n_iter):
-            params, opt_state, loss = update_step(params, opt_state)
-            pb.set_description(f"loss = {float(loss):.4e}")
-            pb.update()
+        for i in tqdm(range(n_stars), desc="Grid search"):
+            flux_i = jnp.array(flux[i])
+            var_i = jnp.array(1.0 / np.maximum(ivar[i], 1e-16))
+
+            best_loss = np.inf
+            best_point = grid_points_all[0]
+
+            for grid_point in grid_points_all:
+                loss_val = float(single_star_loss(jnp.array(grid_point), flux_i, var_i))
+                if loss_val < best_loss:
+                    best_loss = loss_val
+                    best_point = grid_point
+
+            init_labels_std[i] = best_point
+
+        print(f"  Grid search complete.")
+
+    if optimizer == 'bfgs':
+        # BFGS optimization for each star independently
+        print(f"  Running L-BFGS-B optimization...")
+        labels_std_final = np.zeros((n_stars, n_labels))
+
+        for i in tqdm(range(n_stars), desc="BFGS"):
+            flux_i = jnp.array(flux[i])
+            var_i = jnp.array(1.0 / np.maximum(ivar[i], 1e-16))
+            x0 = init_labels_std[i]
+
+            def objective(x):
+                loss, grad = single_star_loss_and_grad(jnp.array(x), flux_i, var_i)
+                return float(loss), np.array(grad)
+
+            result = minimize(
+                objective,
+                x0,
+                method='L-BFGS-B',
+                jac=True,
+                options={'maxiter': n_iter, 'disp': False}
+            )
+            labels_std_final[i] = result.x
+
+    else:  # adam
+        # Batch Adam optimization (original behavior)
+        params = {'labels_std': jnp.array(init_labels_std)}
+
+        @jit
+        def forward(params):
+            """Compute predicted flux from labels."""
+            labels_std = params['labels_std']
+            design_matrix = build_design_matrix_batch_jax(labels_std)
+            W = jnp.maximum(design_matrix @ theta_jnp, 0)
+            pred_flux = 1.0 - W @ H_jnp
+            return pred_flux
+
+        @jit
+        def loss_fn(params):
+            """Compute weighted reconstruction loss."""
+            pred_flux = forward(params)
+            total_var = var_jnp + scatter_sq
+            chi_sq = (flux_jnp - pred_flux)**2 / total_var
+            return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
+
+        @jit
+        def loss_and_grad(params):
+            return jax.value_and_grad(loss_fn)(params)
+
+        opt = optax.adam(learning_rate)
+        opt_state = opt.init(params)
+
+        @jit
+        def update_step(params, opt_state):
+            loss, grads = loss_and_grad(params)
+            updates, opt_state = opt.update(grads, opt_state, params)
+            params = optax.apply_updates(params, updates)
+            return params, opt_state, loss
+
+        with tqdm(total=n_iter) as pb:
+            for i in range(n_iter):
+                params, opt_state, loss = update_step(params, opt_state)
+                pb.set_description(f"loss = {float(loss):.4e}")
+                pb.update()
+
+        labels_std_final = np.array(params['labels_std'])
 
     # Convert back to physical labels
-    labels_std_final = np.array(params['labels_std'])
     labels_final = labels_std_final * label_std + label_mean
 
     return labels_final
@@ -750,9 +827,10 @@ if __name__ == '__main__':
     test_inferred_labels = infer_labels(
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
-        (test_true_labels - label_mean) / label_std,
+        init_labels_std=(test_true_labels - label_mean) / label_std,
         n_iter=3000,
-        learning_rate=0.05
+        learning_rate=0.05,
+        optimizer='adam'
     )
 
     # Compute test statistics
