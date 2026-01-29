@@ -125,7 +125,8 @@ if __name__ == '__main__':
         init_labels_std=None,  # triggers grid search
         n_iter=1000,
         optimizer='bfgs',
-        grid_points=5
+        grid_points=10,
+        grid_range=(-5.0, 5.0)
     )
 
     # Wavelength grid
