@@ -25,7 +25,7 @@ from sklearn.decomposition import NMF
 jax.config.update("jax_enable_x64", True)
 
 
-def load_data(file_path):
+def load_data(file_path, convert_alpha=True):
     """Load and preprocess the training data."""
     data = np.load(file_path)['lux_data']
 
@@ -52,13 +52,22 @@ def load_data(file_path):
     # Compute absorption: A = 1 - flux, clipped to be non-negative
     absorption = np.clip(1.0 - norm_flux, 0.0, np.inf)
 
-    # Extract stellar labels: teff, logg, m_h, alpha_h
-    labels = np.column_stack([
-        data['teff'],
-        data['logg'],
-        data['fe_h'],
-        data['raw_alpha_m_atm'] + data['fe_h']  # [alpha/H] = [alpha/M] + [M/H]
-    ])
+    if convert_alpha:
+        # Extract stellar labels: teff, logg, m_h, alpha_h
+        labels = np.column_stack([
+            data['teff'],
+            data['logg'],
+            data['fe_h'],
+            data['raw_alpha_m_atm'] + data['fe_h']  # [alpha/H] = [alpha/M] + [M/H]
+        ])
+    else:
+        # Extract stellar labels: teff, logg, m_h, alpha_h
+        labels = np.column_stack([
+            data['teff'],
+            data['logg'],
+            data['fe_h'],
+            data['raw_alpha_m_atm']
+        ])
 
     return absorption, norm_flux, norm_ivar, labels
 
@@ -726,11 +735,16 @@ if __name__ == '__main__':
     n_iter = 10_000
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
+    convert_alpha = False  # if True, convert to alpha/h
 
-    label_names = ['teff', 'logg', 'm_h', 'alpha_h']
+    if convert_alpha:
+        label_names = ['teff', 'logg', 'm_h', 'alpha_h']
+        output_dir = 'nmf_joint_results_with_scatter_K32'
+    else:
+        label_names = ['teff', 'logg', 'm_h', 'alpha_m']
+        output_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
 
     # Create output directory
-    output_dir = 'nmf_joint_results_with_scatter_K32'
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
 
@@ -744,7 +758,8 @@ if __name__ == '__main__':
 
     # Load data
     print("\n[1/4] Loading data...")
-    absorption, flux, ivar, true_labels = load_data(data_file)
+    absorption, flux, ivar, true_labels = load_data(data_file,
+                                                    convert_alpha=convert_alpha)
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
