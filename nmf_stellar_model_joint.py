@@ -299,7 +299,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
 def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std=None,
                  n_iter=2000, learning_rate=0.05, seed=42, optimizer='adam',
-                 grid_points=5, grid_range=(-3.0, 3.0)):
+                 grid_points=5, grid_range=(-3.0, 3.0), fine_spacing=1.0):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -338,6 +338,8 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         (only used when init_labels_std is None)
     grid_range : tuple
         (min, max) range in standardized coordinates for grid search
+    fine_spacing: int
+        number of intiial grid points to do adaptive grid search on
 
     Returns:
     --------
@@ -374,22 +376,46 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
 
     # Grid search to find initial values if not provided
     if init_labels_std is None:
-        print(f"  Performing vectorized grid search...")
+        print(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
         
-        grid_1d = np.linspace(grid_range[0], grid_range[1], grid_points)
-        grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))
+        # Build the grid once (shared across all stars)
+        grid_1d = jnp.linspace(grid_range[0], grid_range[1], grid_points)
+        grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
+        n_grid = len(grid_points_all)
         
+        print(f"    Grid has {n_grid:,} points")
+        
+        # Define the grid search function for a single star
         @jit
         def grid_search_star(flux_single, var_single):
             """Find best grid point for a single star."""
-            losses = vmap(lambda pt: single_star_loss(pt, flux_single, var_single))(
+            losses = vmap(lambda grid_pt: single_star_loss(grid_pt, flux_single, var_single))(
                 grid_points_all
             )
-            return grid_points_all[jnp.argmin(losses)]
+            best_idx = jnp.argmin(losses)
+            return grid_points_all[best_idx]
         
-        # Vectorize over all stars - runs on GPU
-        init_labels_std = vmap(grid_search_star)(flux_jnp, var_jnp)
-        init_labels_std = np.array(init_labels_std)
+        # Vectorize across a batch of stars
+        grid_search_batch = jit(vmap(grid_search_star))
+        
+        # Process stars in batches to avoid memory issues
+        batch_size = 500  # Adjust based on your GPU memory
+        n_batches = (n_stars + batch_size - 1) // batch_size
+        init_labels_std = np.zeros((n_stars, n_labels))
+        
+        print(f"    Processing {n_stars} stars in {n_batches} batches of ~{batch_size}...")
+        
+        for i in tqdm(range(n_batches), desc="Grid search batches"):
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, n_stars)
+            
+            # Process this batch
+            batch_result = grid_search_batch(
+                flux_jnp[start_idx:end_idx],
+                var_jnp[start_idx:end_idx]
+            )
+            init_labels_std[start_idx:end_idx] = np.array(batch_result)
+        
         print(f"  Grid search complete.")
 
     if optimizer == 'bfgs':
@@ -858,7 +884,7 @@ if __name__ == '__main__':
     n_iter = 10_000
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
-    convert_alpha = True  # if True, convert to alpha/h
+    convert_alpha = False  # if True, convert to alpha/h
 
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
@@ -970,8 +996,8 @@ if __name__ == '__main__':
         init_labels_std=None,
         n_iter=1000,
         optimizer='bfgs',
-        grid_points=10,
-        grid_range=(-5.0, 5.0)
+        grid_points=25,
+        grid_range=(-3.0, 3.0)
     )
 
     # Compute test statistics
