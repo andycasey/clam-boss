@@ -1,7 +1,9 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from nmf_stellar_model_joint import infer_labels, plot_spectra_comparison
+from nmf_stellar_model_joint import (infer_labels, plot_spectra_comparison,
+                                     predict_with_ridge_npz, load_ridge_model_npz,
+                                     compute_nmf_weights)
 import warnings
 
 
@@ -53,14 +55,16 @@ def plot_cluster_results(test_inferred_labels,
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
+    bad_vals = abs(test_inferred_labels[:, 2]) > 10
+
     if cluster_feh == -9999.:
         cluster_feh0 = cluster_feh
-        cluster_feh = np.nanmean(test_inferred_labels[:, 2])
+        cluster_feh = np.nanmean(test_inferred_labels[:, 2][~bad_vals])
         plot_mean = False
     else:
         cluster_feh0 = cluster_feh
         plot_mean = True
-    maxx_diff = np.nanpercentile(abs(test_inferred_labels[:, 2] - cluster_feh), 95)
+    maxx_diff = np.nanpercentile(abs(test_inferred_labels[:, 2][~bad_vals] - cluster_feh), 95)
 
     dens = ax1.scatter(test_inferred_labels[:, 0],
                        test_inferred_labels[:, 1],
@@ -75,15 +79,15 @@ def plot_cluster_results(test_inferred_labels,
     ax1.set_ylabel('log(g)')
     ax1.grid()
 
-    ax2.hist(test_inferred_labels[:, 2])
+    ax2.hist(test_inferred_labels[:, 2][~bad_vals])
     if plot_mean:
         ax2.axvline(cluster_feh, linestyle='--', c='r')
     ax2.set_xlabel('[Fe/H]')
     ax2.set_ylabel('N')
     ax2.grid()
     
-    mean = np.nanmean(test_inferred_labels[:, 2])
-    std = np.nanstd(test_inferred_labels[:, 2])
+    mean = np.nanmean(test_inferred_labels[:, 2][~bad_vals])
+    std = np.nanstd(test_inferred_labels[:, 2][~bad_vals])
     plt.suptitle(f"{cluster}: [Fe/H] = {cluster_feh0:.4f}, CLAM [Fe/H] = {mean:.4f} +/- {std:.4f}")
     plt.savefig(f"{output_dir}/{cluster}.png", dpi=200)
     plt.close()
@@ -97,7 +101,7 @@ if __name__ == '__main__':
     learning_rate = 0.01 # 0.1 is too aggressive
     print_every = 1000
 
-    convert_alpha = True
+    convert_alpha = False
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
         save_dir = 'nmf_joint_results_with_scatter_K32'
@@ -123,15 +127,25 @@ if __name__ == '__main__':
     label_mean = res['label_mean']
     label_std = res['label_std']
     scatter = res['scatter']
+
+    # predict from ridge model
+    model_path = f'{save_dir}/nmf_ridge_model.npz'
+    W_vals = compute_nmf_weights(flux, H)
+    init_labels = predict_with_ridge_npz(
+        W_vals,
+        load_ridge_model_npz(model_path=model_path))
+    init_labels_std = (init_labels - label_mean) / label_std
+
     # Infer labels using BFGS with grid search initialization
     test_inferred_labels = infer_labels(
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
-        init_labels_std=None,  # triggers grid search
-        n_iter=1000,
-        optimizer='bfgs',
-        grid_points=10,
-        grid_range=(-5.0, 5.0)
+        init_labels_std=init_labels_std,
+        n_iter=[100, 1000],
+        learning_rate=0.01,
+        optimizer='two-stage',
+        grid_points=None,
+        grid_range=None
     )
 
     # Wavelength grid
