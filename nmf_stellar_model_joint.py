@@ -297,9 +297,117 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
 
 
+def compute_nmf_weights(flux, H):
+    """Compute W from flux using least squares."""
+    
+    # Convert to absorption
+    absorption = np.clip(1.0 - flux, 0.0, np.inf)
+    
+    # Solve: W @ H = absorption
+    # W = absorption @ H.T @ (H @ H.T)^{-1}
+    H_HT_inv = np.linalg.inv(H @ H.T + 1e-6 * np.eye(H.shape[0]))
+    W = absorption @ H.T @ H_HT_inv
+    
+    # Enforce non-negativity
+    W = np.maximum(W, 0.0)
+    
+    return W
+
+
+def save_ridge_model_npz(ridge_model, W_scaler, label_scaler, 
+                         save_path='nmf_ridge_model.npz'):
+    """
+    Save Ridge model as numpy arrays in NPZ format.
+    """
+    print(f"Saving Ridge model to {save_path}...")
+    
+    # Extract the actual parameters (just numpy arrays!)
+    model_params = {
+        # Ridge model parameters
+        'ridge_coef': ridge_model.coef_,           # (n_labels, K)
+        'ridge_intercept': ridge_model.intercept_,  # (n_labels,)
+        
+        # W scaler parameters
+        'W_mean': W_scaler.mean_,                   # (K,)
+        'W_scale': W_scaler.scale_,                 # (K,)
+        
+        # Label scaler parameters
+        'label_mean': label_scaler.mean_,           # (n_labels,)
+        'label_scale': label_scaler.scale_,         # (n_labels,)
+    }
+    
+    np.savez(save_path, **model_params)
+    return
+
+
+def train_and_save_ridge_model(W_train, train_labels, save_path='nmf_ridge_model.npz',
+                               alpha=1.0):
+    """
+    Train and save ridge model used for initial guess
+    """
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+    
+    print("Training Ridge regression...")
+    
+    # Fit scalers
+    W_scaler = StandardScaler()
+    label_scaler = StandardScaler()
+    
+    W_train_scaled = W_scaler.fit_transform(W_train)
+    labels_scaled = label_scaler.fit_transform(train_labels)
+    
+    # Train Ridge
+    ridge = Ridge(alpha=alpha)
+    ridge.fit(W_train_scaled, labels_scaled)
+    
+    # save model
+    save_ridge_model_npz(ridge, W_scaler, label_scaler, save_path)
+    
+    print(f"\nModel saved to {save_path}")
+    
+    return
+
+
+def load_ridge_model_npz(model_path='nmf_ridge_model.npz'):
+    """
+    Load Ridge model from NPZ file.
+    """
+    data = np.load(model_path)
+    
+    model_params = {
+        'ridge_coef': data['ridge_coef'],
+        'ridge_intercept': data['ridge_intercept'],
+        'W_mean': data['W_mean'],
+        'W_scale': data['W_scale'],
+        'label_mean': data['label_mean'],
+        'label_scale': data['label_scale'],
+    }
+    
+    return model_params
+
+
+def predict_with_ridge_npz(W, model_params):
+    """
+    Predict labels using saved Ridge model parameters.
+
+    Used for initial guess of optimization
+    """
+    # Standardize W
+    W_scaled = (W - model_params['W_mean']) / model_params['W_scale']
+    
+    # Predict (Ridge is just linear: y = X @ coef + intercept)
+    labels_scaled = W_scaled @ model_params['ridge_coef'].T + model_params['ridge_intercept']
+    
+    # Inverse transform labels
+    predicted_labels = labels_scaled * model_params['label_scale'] + model_params['label_mean']
+    
+    return predicted_labels
+
+
 def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std=None,
                  n_iter=2000, learning_rate=0.05, seed=42, optimizer='adam',
-                 grid_points=5, grid_range=(-3.0, 3.0), fine_spacing=1.0):
+                 grid_points=5, grid_range=(-3.0, 3.0)):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -325,21 +433,20 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     init_labels_std : array (n_stars, 4) or None
         Initial standardized labels. If None, performs grid search to find
         best starting point for each spectrum.
-    n_iter : int
-        Number of optimization iterations (for Adam) or max iterations (for BFGS)
+    n_iter : int | list
+        Number of optimization iterations (for Adam) or max iterations (for BFGS).
+        Can be list for two-stage optimization, which then sets for each step.
     learning_rate : float
         Learning rate for Adam optimizer (ignored for BFGS)
     seed : int
         Random seed
     optimizer : str
-        Optimization method: 'adam' or 'bfgs'
-    grid_points : int
+        Optimization method: 'adam' or 'bfgs' or 'two-stage'
+    grid_points : int | list
         Number of grid points per dimension for initial grid search
         (only used when init_labels_std is None)
-    grid_range : tuple
+    grid_range : tuple | list
         (min, max) range in standardized coordinates for grid search
-    fine_spacing: int
-        number of intiial grid points to do adaptive grid search on
 
     Returns:
     --------
@@ -376,11 +483,15 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
 
     # Grid search to find initial values if not provided
     if init_labels_std is None:
-        print(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
-        
         # Build the grid once (shared across all stars)
-        grid_1d = jnp.linspace(grid_range[0], grid_range[1], grid_points)
-        grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
+        if isinstance(grid_range, tuple):
+            print(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
+            grid_1d = jnp.linspace(grid_range[0], grid_range[1], grid_points)
+            grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
+        else:
+            print(f"  Performing batched grid search {np.prod(grid_points)} points per star)...")
+            grid_1d = [jnp.linspace(grid_range[i][0], grid_range[i][1], grid_points[i]) for i in range(len(grid_range))]
+            grid_points_all = jnp.array(list(product(*grid_1d)))
         n_grid = len(grid_points_all)
         
         print(f"    Grid has {n_grid:,} points")
@@ -418,8 +529,57 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         
         print(f"  Grid search complete.")
 
-    if optimizer == 'bfgs':
-        # GPU-accelerated BFGS using jaxopt (10-100x faster)
+    if optimizer == 'two-stage' or optimizer == 'adam':
+        # do adam and save as init if two-stage warmup
+        params = {'labels_std': jnp.array(init_labels_std)}
+
+        @jit
+        def forward(params):
+            """Compute predicted flux from labels."""
+            labels_std = params['labels_std']
+            design_matrix = build_design_matrix_batch_jax(labels_std)
+            W = jnp.maximum(design_matrix @ theta_jnp, 0)
+            pred_flux = 1.0 - W @ H_jnp
+            return pred_flux
+
+        @jit
+        def loss_fn(params):
+            """Compute weighted reconstruction loss."""
+            pred_flux = forward(params)
+            total_var = var_jnp + scatter_sq
+            chi_sq = (flux_jnp - pred_flux)**2 / total_var
+            return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
+
+        @jit
+        def loss_and_grad(params):
+            return jax.value_and_grad(loss_fn)(params)
+
+        opt = optax.adam(learning_rate)
+        opt_state = opt.init(params)
+
+        @jit
+        def update_step(params, opt_state):
+            loss, grads = loss_and_grad(params)
+            updates, opt_state = opt.update(grads, opt_state, params)
+            params = optax.apply_updates(params, updates)
+            return params, opt_state, loss
+
+        if optimizer == 'adam':
+            n_iteri = n_iter
+        else:
+            n_iteri = n_iter[0]
+        with tqdm(total=n_iteri) as pb:
+            for i in range(n_iteri):
+                params, opt_state, loss = update_step(params, opt_state)
+                pb.set_description(f"loss = {float(loss):.4e}")
+                pb.update()
+
+        if optimizer == 'adam':
+            labels_std_final = np.array(params['labels_std'])
+        else:
+            init_labels_std = np.array(params['labels_std'])  # update to results from adam for two-stage
+    if optimizer == 'two-stage' or optimizer == 'bfgs':
+        # GPU-accelerated BFGS using jaxopt
         try:
             import jaxopt
         except ImportError:
@@ -429,7 +589,11 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         labels_std_final = np.zeros((n_stars, n_labels))
         
         # Create solver
-        solver = jaxopt.LBFGS(fun=single_star_loss, maxiter=n_iter, tol=1e-6)
+        if optimizer == 'bfgs':
+            n_iteri = n_iter
+        else:
+            n_iteri = n_iter[1]
+        solver = jaxopt.LBFGS(fun=single_star_loss, maxiter=n_iteri, tol=1e-6)
         
         # Batch size - adjust based on GPU memory (100 is safe for most GPUs)
         batch_size = 100
@@ -653,6 +817,7 @@ def plot_loss(losses, save_path):
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved loss plot to {save_path}")
+
 
 def plot_model_scatter(wavelength, scatter, save_path):
     """
@@ -989,15 +1154,41 @@ if __name__ == '__main__':
     print(f"Test set: {len(test_flux)} spectra")
     print("Inferring labels using trained model (theta, H fixed)...")
 
+    print('"Training Ridge Regression to use as initial guesser...')
+
+    # train model
+    W_train = compute_nmf_weights(test_flux, H)
+    model_path = f'{output_dir}/nmf_ridge_model.npz'
+    train_and_save_ridge_model(W_train, test_true_labels,
+                               save_path=model_path, alpha=1.)
+    # predict from this model
+    init_labels = predict_with_ridge_npz(W_train, load_ridge_model_npz(model_path=model_path))
+    init_labels_std = (init_labels - label_mean) / label_std
+
+    print("\n" + "=" * 60)
+    print("Summary Statistics (Ridge Regression)")
+    print("=" * 60)
+    stats = compute_label_statistics(test_true_labels, init_labels, label_names)
+    for name in label_names:
+        s = stats[name]
+        print(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
+
+
+    # create percentile based gridding
+    # true_norm = (true_labels - label_mean) / label_std
+    # grid_points = [40, 40, 22, 10]  # do denser in teff, logg
+    # grid_range = [np.nanpercentile(true_norm[:, i], [0.1, 99.9]) for i in range(true_norm.shape[1])]
+
     # Infer labels using only flux and ivar
     test_inferred_labels = infer_labels(
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
-        init_labels_std=None,
-        n_iter=1000,
-        optimizer='bfgs',
-        grid_points=25,
-        grid_range=(-3.0, 3.0)
+        init_labels_std=init_labels_std,
+        n_iter=[100, 1000],
+        learning_rate=0.01,
+        optimizer='two-stage',
+        grid_points=None,
+        grid_range=None
     )
 
     # Compute test statistics
