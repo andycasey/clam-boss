@@ -1042,12 +1042,88 @@ def alpha_fe_plot(y_test: np.ndarray,
     plt.close()
 
 
+
+def unf_training_sample(true_labels, nbins,
+                        nstars_per_bin,
+                        random_seed=None, ranges=None):
+    """
+    Create a uniform sampling across parameter space using multi-dimensional binning.
+    
+    Parameters
+    ----------
+    true_labels : array-like, shape (N, D)
+        The parameter values for N samples across D dimensions
+    nbins : int
+        Number of bins per dimension
+    nstars_per_bin : int
+        Target number of stars to sample per bin
+    random_seed : int, optional
+        Random seed for reproducibility
+    ranges: list
+        set the range for the dimensions
+        
+    Returns
+    -------
+    indices : array
+        Indices of selected samples from the original true_labels array
+    """
+    # Set random seed if provided
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    N, D = true_labels.shape
+
+    if ranges is None:
+        ranges = [None] * D
+    
+    # Create bin edges for each dimension
+    bin_edges = []
+    for d in range(D):
+        if ranges[d] is None:
+            edges = np.linspace(true_labels[:, d].min(), 
+                               true_labels[:, d].max(), 
+                               nbins + 1)
+        else:
+            edges = np.linspace(ranges[d][0], 
+                                ranges[d][1], 
+                                nbins + 1)
+        bin_edges.append(edges)
+    
+    # Assign each sample to a bin (multi-dimensional bin index)
+    bin_indices = np.zeros((N, D), dtype=int)
+    for d in range(D):
+        # digitize returns 1-indexed bins, so subtract 1
+        bin_indices[:, d] = np.digitize(true_labels[:, d], bin_edges[d]) - 1
+        # Handle edge case where max values get assigned to bin nbins
+        bin_indices[:, d] = np.clip(bin_indices[:, d], 0, nbins - 1)
+    
+    # Collect samples from each occupied bin
+    selected_indices = []
+    
+    # Iterate through all possible bin combinations
+    for bin_combo in np.ndindex(*([nbins] * D)):
+        # Find all samples in this bin
+        mask = np.all(bin_indices == bin_combo, axis=1)
+        samples_in_bin = np.where(mask)[0]
+        
+        if len(samples_in_bin) == 0:
+            continue
+        
+        # Sample nstars_per_bin or all available stars
+        n_to_sample = min(nstars_per_bin, len(samples_in_bin))
+        sampled = np.random.choice(samples_in_bin, size=n_to_sample, replace=False)
+        selected_indices.extend(sampled)
+    
+    return np.array(selected_indices)
+
+
+
 if __name__ == '__main__':
     # Configuration
     data_file = 'boss_apogee_lux_training_data.npz'
-    K = 32
+    K = 48
     n_iter = 10_000
-    learning_rate = 0.01 # 0.1 is too aggressive
+    learning_rate = 0.001 # 0.1 is too aggressive
     print_every = 1000
     convert_alpha = False  # if True, convert to alpha/h
 
@@ -1080,8 +1156,23 @@ if __name__ == '__main__':
 
     # Joint optimization
     print("\n[2/4] Running joint optimization...")
+    # get training subsample
+    train_w_subsample = True
+    if train_w_subsample:
+        nbins = 15
+        nstars_per_bin = 7
+        ranges = [[4000, 6500],
+                [1, 5],
+                [-2, 0.5],
+                [-0.1, 0.3]]
+        idx_train = unf_training_sample(
+            true_labels,
+            nbins, nstars_per_bin,
+            random_seed=42, ranges=ranges)
+    else:
+        idx_train = np.arange(len(true_labels))
     inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
-        flux, ivar, true_labels, K,
+        flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
         n_iter=n_iter,
         learning_rate=learning_rate,
         print_every=print_every,
@@ -1090,7 +1181,7 @@ if __name__ == '__main__':
 
     # Compute statistics
     print("\n[3/4] Computing statistics...")
-    stats = compute_label_statistics(true_labels, inferred_labels, label_names)
+    stats = compute_label_statistics(true_labels[idx_train], inferred_labels, label_names)
 
     print("\n" + "=" * 60)
     print("Summary Statistics (Training Set)")
@@ -1106,13 +1197,13 @@ if __name__ == '__main__':
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
     wavelength = 10**loglam
 
-    plot_comparison(true_labels, inferred_labels, label_names, f'{output_dir}/label_comparison.png')
-    plot_residual_histograms(true_labels, inferred_labels, label_names, f'{output_dir}/label_residuals.png')
+    plot_comparison(true_labels[idx_train], inferred_labels, label_names, f'{output_dir}/label_comparison.png')
+    plot_residual_histograms(true_labels[idx_train], inferred_labels, label_names, f'{output_dir}/label_residuals.png')
     plot_nmf_components(H, f'{output_dir}/nmf_components.png')
     if len(losses) > 1:
         plot_loss(losses, f'{output_dir}/optimization_loss.png')
     plot_spectra_comparison(
-        flux, ivar, true_labels, inferred_labels,
+        flux[idx_train], ivar[idx_train], true_labels[idx_train], inferred_labels,
         theta, H, label_mean, label_std, wavelength,
         f'{output_dir}/spectra_comparison.png', n_plot=20
     )
@@ -1126,6 +1217,7 @@ if __name__ == '__main__':
     np.savez(f'{output_dir}/joint_model_results.npz',
              inferred_labels=inferred_labels,
              true_labels=true_labels,
+             idx_train=idx_train,
              theta=theta,
              H=H,
              W=W,
@@ -1157,11 +1249,12 @@ if __name__ == '__main__':
     print('"Training Ridge Regression to use as initial guesser...')
 
     # train model
-    W_train = compute_nmf_weights(test_flux, H)
+    W_train = compute_nmf_weights(flux[idx_train], H)
     model_path = f'{output_dir}/nmf_ridge_model.npz'
-    train_and_save_ridge_model(W_train, test_true_labels,
+    train_and_save_ridge_model(W_train, true_labels[idx_train],
                                save_path=model_path, alpha=1.)
     # predict from this model
+    W_train = compute_nmf_weights(test_flux, H)
     init_labels = predict_with_ridge_npz(W_train, load_ridge_model_npz(model_path=model_path))
     init_labels_std = (init_labels - label_mean) / label_std
 
