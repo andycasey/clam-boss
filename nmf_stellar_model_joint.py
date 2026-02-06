@@ -1124,7 +1124,7 @@ def unf_training_sample(true_labels, nbins,
 if __name__ == '__main__':
     # Configuration
     data_file = 'boss_apogee_lux_training_data.npz'
-    K = 128
+    K = 160
     n_iter = 10_000
     learning_rate = 0.001 # 0.1 is too aggressive
     print_every = 1000
