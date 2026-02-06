@@ -15,6 +15,7 @@ import os
 import numpy as np
 import jax
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import jit, vmap
 import optax
 import matplotlib.pyplot as plt
@@ -189,7 +190,9 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
     # Initialize theta from initial W and labels
     design_matrix = build_design_matrix_np(init_labels_std)
-    theta_init, _, _, _ = np.linalg.lstsq(design_matrix, W_init, rcond=None)
+    raw_target = np.log(np.expm1(np.maximum(W_init, 1e-8)))
+    theta_init, _, _, _ = np.linalg.lstsq(design_matrix, raw_target, rcond=None)
+
 
 
     # Convert to JAX arrays
@@ -219,7 +222,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
         design_matrix = build_design_matrix_batch_jax(labels_std)
 
         # Predict weights (enforce non-negativity)
-        W = jnp.maximum(design_matrix @ theta, 0)
+        W = jnn.softplus(design_matrix @ theta)
 
         # Predict flux
         pred_flux = 1.0 - W @ H
@@ -292,7 +295,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
     # Compute final W
     design_matrix_final = build_design_matrix_np(labels_std_final)
-    W_final = np.maximum(design_matrix_final @ theta_final, 0)
+    W_final = np.array(jnn.softplus(design_matrix_final @ theta_final))
 
     return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
 
@@ -473,7 +476,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     def single_star_loss(labels_std_single, flux_single, var_single):
         """Compute loss for a single star."""
         design_vec = build_design_matrix_jax(labels_std_single)
-        W = jnp.maximum(design_vec @ theta_jnp, 0)
+        W = jnn.softplus(design_vec @ theta_jnp)
         pred_flux = 1.0 - W @ H_jnp
         total_var = var_single + scatter_sq
         chi_sq = (flux_single - pred_flux)**2 / total_var
@@ -538,7 +541,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
             """Compute predicted flux from labels."""
             labels_std = params['labels_std']
             design_matrix = build_design_matrix_batch_jax(labels_std)
-            W = jnp.maximum(design_matrix @ theta_jnp, 0)
+            W = jnn.softplus(design_matrix @ theta_jnp)
             pred_flux = 1.0 - W @ H_jnp
             return pred_flux
 
@@ -626,7 +629,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
             """Compute predicted flux from labels."""
             labels_std = params['labels_std']
             design_matrix = build_design_matrix_batch_jax(labels_std)
-            W = jnp.maximum(design_matrix @ theta_jnp, 0)
+            W = jnn.softplus(design_matrix @ theta_jnp)
             pred_flux = 1.0 - W @ H_jnp
             return pred_flux
 
@@ -860,13 +863,13 @@ def plot_spectra_comparison(flux, ivar, true_labels, inferred_labels,
         # Model flux from inferred labels
         inf_labels_std = (inferred_labels[i] - label_mean) / label_std
         design_vec = build_design_matrix_np(inf_labels_std.reshape(1, -1))
-        inf_weights = np.maximum(design_vec @ theta, 0)[0]
+        inf_weights = np.array(jnn.softplus(design_vec @ theta))[0]
         model_flux = 1.0 - inf_weights @ H
 
         # Model flux from true labels
         true_labels_std = (true_labels[i] - label_mean) / label_std
         design_vec_true = build_design_matrix_np(true_labels_std.reshape(1, -1))
-        true_weights = np.maximum(design_vec_true @ theta, 0)[0]
+        true_weights = np.array(jnn.softplus(design_vec_true @ theta))[0]
         true_model_flux = 1.0 - true_weights @ H
 
         ax.plot(wavelength, obs_flux, 'k-', lw=0.5, alpha=0.7, label='Observed')
@@ -1121,7 +1124,7 @@ def unf_training_sample(true_labels, nbins,
 if __name__ == '__main__':
     # Configuration
     data_file = 'boss_apogee_lux_training_data.npz'
-    K = 48
+    K = 128
     n_iter = 10_000
     learning_rate = 0.001 # 0.1 is too aggressive
     print_every = 1000
