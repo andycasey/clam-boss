@@ -114,6 +114,7 @@ def build_design_matrix_jax(labels_std):
 
 def build_design_matrix_batch_jax(labels_std_batch):
     """Build design matrix for a batch of stars."""
+    labels_std_batch = jnp.atleast_2d(labels_std_batch)
     return vmap(build_design_matrix_jax)(labels_std_batch)
 
 

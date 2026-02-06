@@ -7,7 +7,7 @@ from nmf_stellar_model_joint import (infer_labels, plot_spectra_comparison,
 import warnings
 
 
-def load_data(file_path):
+def load_data(file_path, open_clusters):
     """Load and preprocess the training data."""
     data = np.load(file_path)['boss_cluster_data']
 
@@ -35,12 +35,19 @@ def load_data(file_path):
     absorption = np.clip(1.0 - norm_flux, 0.0, np.inf)
 
     # Extract stellar labels: teff, logg, m_h, alpha_h
-    labels = np.column_stack([
-        data['cluster_feh'],
-        data['pm_prob'],
-        data['rv_prob'],
-        data['feh_prob']
-    ])
+    if open_clusters:
+        labels = np.column_stack([
+            data['cluster_feh'],
+            data['pm_prob'],
+            data['rv_prob'],
+            data['feh_prob']
+        ])
+    else:
+        labels = np.column_stack([
+            data['cluster_feh'],
+            data['rv_prob'],
+            data['vb_prob']
+        ])
     cluster = data['cluster']
 
     return absorption, norm_flux, norm_ivar, labels, cluster
@@ -95,7 +102,13 @@ def plot_cluster_results(test_inferred_labels,
 
 if __name__ == '__main__':
     # Configuration
-    data_file = 'boss_cluster_stars_data.npz'
+    open_clusters = False
+    if open_clusters:
+        data_file = 'boss_cluster_stars_data.npz'
+        dir_start = 'boss_cluster_validation'
+    else:
+        data_file = 'boss_gc_stars_data.npz'
+        dir_start = 'boss_gc_validation'
     K = 32
     n_iter = 10_000
     learning_rate = 0.01 # 0.1 is too aggressive
@@ -105,18 +118,18 @@ if __name__ == '__main__':
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
         save_dir = 'nmf_joint_results_with_scatter_K32'
-        output_dir = 'boss_cluster_validation'
+        output_dir = f'{dir_start}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
         save_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
-        output_dir = 'boss_cluster_validation_alpha_m'
+        output_dir = f'{dir_start}_alpha_m'
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
 
     # Load data
     print("\nLoading data...")
-    absorption, flux, ivar, true_labels, cluster = load_data(data_file)
+    absorption, flux, ivar, true_labels, cluster = load_data(data_file, open_clusters)
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
