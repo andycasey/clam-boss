@@ -21,7 +21,7 @@ import optax
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 import warnings
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from sklearn.decomposition import NMF
 
 jax.config.update("jax_enable_x64", True)
@@ -141,7 +141,11 @@ def build_design_matrix_np(labels_std):
 
 
 def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.01,
-                       print_every=500, seed=42, label_weight=1.0):
+                       print_every=500, seed=42, label_weight=1.0,
+                       per_label_weights=None,
+                       label_mean=None, label_std=None,
+                       scatter=None,
+                       theta=None, H=None):
     """
     Jointly optimize stellar labels, polynomial coefficients, and NMF basis.
 
@@ -179,8 +183,10 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     print(f"  Total parameters: {n_stars * n_labels + n_features * K + K * n_wavelengths:,}")
 
     # Standardize labels
-    label_mean = np.mean(init_labels, axis=0)
-    label_std = np.std(init_labels, axis=0)
+    if label_mean is None:
+        label_mean = np.nanmean(init_labels, axis=0)
+    if label_std is None:
+        label_std = np.nanstd(init_labels, axis=0)
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Initialize NMF from absorption spectra
@@ -202,14 +208,26 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     label_mean_jnp = jnp.array(label_mean)
     label_std_jnp = jnp.array(label_std)
     init_labels_std_jnp = jnp.array(init_labels_std)
+    if per_label_weights is None:
+        per_label_weights_jnp = jnp.zeros_like(init_labels_std_jnp) + 1.
+    else:
+        per_label_weights_jnp = jnp.array(per_label_weights)
 
     # Parameters to optimize (all unconstrained, we'll apply constraints in forward pass)
     # Use log-space for H to ensure positivity
+    if theta is not None:
+        theta_init = theta
+    if H is not None:
+        H_init = H
+    if scatter is not None:
+        ln_scatter_init = jnp.log(scatter)
+    else:
+        ln_scatter_init = 0.1 * jnp.ones(n_wavelengths) # initialize scatter params
     params = {
         'labels_std': jnp.array(init_labels_std),
         'theta': jnp.array(theta_init),
         'log_H': jnp.log(jnp.array(H_init) + 1e-10),
-        'ln_scatter': 0.1 * jnp.ones(n_wavelengths) # initialize scatter params
+        'ln_scatter': ln_scatter_init
     }
 
     @jit
@@ -247,7 +265,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
         # Label loss: penalize deviation from initial labels (normalized by number of labels)
         label_residual = params['labels_std'] - init_labels_std_jnp
-        label_loss = jnp.sum(label_residual ** 2) / (n_stars * n_labels)
+        label_loss = jnp.sum(per_label_weights_jnp * (label_residual ** 2)) / (n_stars * n_labels)
 
         return recon_loss + label_weight * label_loss
 
@@ -299,6 +317,92 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     W_final = np.array(jnn.softplus(design_matrix_final @ theta_final))
 
     return labels_final, theta_final, H_final, W_final, label_mean, label_std, losses, scatter
+
+
+def joint_optimization_with_em(
+    flux, ivar,
+    labels_obs_phys,        # shape (n_stars, n_labels), put arbitrary values where missing
+    labels_obs_mask,        # bool mask (n_stars, n_labels): True = observed/fixed, False = missing
+    theta, H, K,
+    label_mean, label_std,
+    scatter,
+    infer_kwargs=None,      # dict of kwargs forwarded to infer_labels()
+    joint_kwargs=None,      # dict of kwargs forwarded to your existing joint_optimization()
+    em_iters=3,
+    em_adam_iters=200,
+):
+    """
+    Wrapper that runs EM-style training:
+      - E-step: infer missing labels with infer_labels(..., fixed_mask=~labels_obs_mask)
+      - M-step: call your original joint_optimization(...) with filled labels
+
+    Minimal changes: original joint_optimization() is called unchanged.
+    Returns: theta, H, labels_filled_phys
+    """
+
+    if infer_kwargs is None:
+        infer_kwargs = {}
+    if joint_kwargs is None:
+        joint_kwargs = {}
+
+    n_stars = labels_obs_phys.shape[0]
+    n_labels = labels_obs_phys.shape[1]
+
+    # make a working copy of labels (physical units). For missing entries, fill with label_mean as a safe init
+    labels_filled = labels_obs_phys.copy().astype(float)
+    missing = ~np.asarray(labels_obs_mask).astype(bool)
+    if np.any(missing):
+        # initialize missing entries to global mean (or you can use other init)
+        for i in range(n_stars):
+            for j in range(n_labels):
+                if missing[i, j]:
+                    labels_filled[i, j] = label_mean[j]
+
+    # Prepare fixed_mask to pass into infer_labels: True=fix, False=free
+    # Note infer_labels expects fixed_mask meaning "fix this dim", but we wrote infer with fixed_mask where True=fix.
+    fixed_mask_for_infer = np.asarray(labels_obs_mask).astype(bool)  # True where observed -> fix
+
+    # Use standardized initial labels for infer_labels init if it helps convergence
+    def phys_to_std(arr_phys, label_mean, label_std):
+        return (np.asarray(arr_phys) - label_mean) / label_std
+
+    # EM loop
+    for em_it in range(em_iters):
+        # --- E-step: infer missing dims using current theta/H
+        # Provide current labels_filled as the init; infer_labels expects init_labels_std (standardized)
+        init_labels_std = phys_to_std(labels_filled, label_mean, label_std)
+
+        # call infer_labels to re-fit missing dims. We pass fixed_mask so it will optimize only missing dims.
+        # Note: infer_labels' fixed_mask param means "True => fix this dim", so we pass exactly labels_obs_mask
+        infer_args = dict(
+            flux=flux,
+            ivar=ivar,
+            theta=theta,
+            H=H,
+            label_mean=label_mean,
+            label_std=label_std,
+            scatter=scatter,
+            init_labels_std=init_labels_std,
+            n_iter=em_adam_iters,
+            learning_rate=infer_kwargs.get('learning_rate', 0.05),
+            optimizer=infer_kwargs.get('optimizer', 'adam'),
+            fixed_mask=fixed_mask_for_infer,
+            **{k: v for k, v in infer_kwargs.items() if k not in ['learning_rate', 'optimizer']}
+        )
+        # infer_labels returns labels in physical units (per our implementation)
+        labels_new = infer_labels(**infer_args)  # shape (n_stars, n_labels) physical
+
+        # Replace only missing entries in labels_filled (observed entries stay as observed)
+        labels_filled[missing] = labels_new[missing]
+
+        # --- M-step: call your original joint_optimization to update theta, H using labels_filled
+        labels_filled, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
+            flux, ivar, labels_filled, K,
+            label_mean=label_mean, label_std=label_std, scatter=scatter,
+            theta=theta, H=H,
+            **joint_kwargs
+        )
+    return labels_filled, theta, H, W, label_mean, label_std, losses, scatter
 
 
 def compute_nmf_weights(flux, H):
@@ -411,7 +515,8 @@ def predict_with_ridge_npz(W, model_params):
 
 def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std=None,
                  n_iter=2000, learning_rate=0.05, seed=42, optimizer='adam',
-                 grid_points=5, grid_range=(-3.0, 3.0)):
+                 grid_points=5, grid_range=(-3.0, 3.0),
+                 fixed_mask=None, fixed_values_phys=None):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -451,6 +556,12 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         (only used when init_labels_std is None)
     grid_range : tuple | list
         (min, max) range in standardized coordinates for grid search
+    fixed_mask : None, or array-like
+        Optional. If provided, can be shape (n_labels,) or (n_stars, n_labels).
+        True means the corresponding label dimension is fixed (not optimized).
+    fixed_values_phys : None, or array-like
+        Optional. Physical-unit values to fix to when fixed_mask is True.
+        Broadcast rules same as fixed_mask.
 
     Returns:
     --------
@@ -532,6 +643,114 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
             init_labels_std[start_idx:end_idx] = np.array(batch_result)
         
         print(f"  Grid search complete.")
+
+    # add option for when some are fixed during EM-style joint opt
+    if fixed_mask is not None:
+        # Normalize fixed_mask to shape (n_stars, n_labels)
+        fm = np.asarray(fixed_mask)
+        if fm.ndim == 1:
+            if fm.size != n_labels:
+                raise ValueError("fixed_mask length must equal n_labels")
+            fm = np.tile(fm[None, :], (n_stars, 1))
+        elif fm.shape != (n_stars, n_labels):
+            raise ValueError("fixed_mask must be shape (n_stars, n_labels) or (n_labels,)")
+
+        # fixed_values_phys optional: broadcast if needed and convert to standardized
+        if fixed_values_phys is not None:
+            fv = np.asarray(fixed_values_phys)
+            if fv.ndim == 1:
+                if fv.size != n_labels:
+                    raise ValueError("fixed_values_phys length must equal n_labels")
+                fv = np.tile(fv[None, :], (n_stars, 1))
+            elif fv.shape != (n_stars, n_labels):
+                raise ValueError("fixed_values_phys must be shape (n_stars, n_labels) or (n_labels,)")
+            fv_std = (fv - label_mean) / (label_std + 1e-12)
+        else:
+            fv_std = None
+
+        # Convert to jnp arrays for jit/vmap
+        init_std_jnp = jnp.array(init_labels_std)
+        fv_std_jnp = jnp.array(fv_std) if fv_std is not None else None
+        fm_bool = np.array(fm, dtype=bool)
+
+        # Group stars by unique mask pattern
+        mask_tuples = [tuple(row.tolist()) for row in fm_bool]
+        unique_masks = {}
+        for idx, m in enumerate(mask_tuples):
+            unique_masks.setdefault(m, []).append(idx)
+
+        labels_std_out = np.zeros((n_stars, n_labels))
+
+        # For each unique mask, optimize in batch using Adam
+        for mask_tuple, indices in unique_masks.items():
+            idx_arr = np.array(indices, dtype=int)
+            m_bool = np.array(mask_tuple, dtype=bool)
+            free_idx = np.where(~m_bool)[0]
+            k = free_idx.size
+
+            # If no free dims, just fill from fixed values or init
+            if k == 0:
+                if fv_std is not None:
+                    labels_std_out[idx_arr] = np.array(fv_std_jnp[idx_arr])
+                else:
+                    labels_std_out[idx_arr] = np.array(init_std_jnp[idx_arr])
+                continue
+
+            # Prepare per-group arrays (jnp)
+            init_full_group_jnp = jnp.array(init_std_jnp[idx_arr])   # (gsize, n_labels)
+            z0_group = jnp.array(init_full_group_jnp[:, free_idx])   # (gsize, k)
+            flux_group_jnp = jnp.array(flux_jnp[idx_arr])            # (gsize, n_lambda)
+            var_group_jnp = jnp.array(var_jnp[idx_arr])              # (gsize, n_lambda)
+
+            if fv_std is not None:
+                fixed_vals_for_solver_jnp = jnp.array(fv_std_jnp[idx_arr])  # (gsize, n_labels)
+            else:
+                fixed_vals_for_solver_jnp = None
+
+            # Define per-star loss fun: inputs z (k,), init_full (n_labels,), fixed_vals (n_labels,), flux,var
+            def loss_per_star(z, init_full, fixed_vals, flux_s, var_s):
+                full = init_full
+                full = full.at[free_idx].set(z)
+                if fixed_vals is not None:
+                    full = full.at[m_bool].set(fixed_vals[m_bool])
+                return single_star_loss(full, flux_s, var_s)
+
+            # Vectorized grad fn: returns grads shape (gsize, k)
+            grad_fn = jax.jit(jax.vmap(jax.grad(loss_per_star, argnums=0),
+                                       in_axes=(0, 0, 0, 0, 0)))
+
+            # Adam optimizer setup for z (per-group, batched)
+            lr = float(learning_rate)
+            opt = optax.adam(lr)
+            opt_state = opt.init(z0_group)
+            z = z0_group  # jnp array shape (gsize, k)
+
+            # update step (jit)
+            @jax.jit
+            def adam_step(z, opt_state, init_full_group, fixed_vals_group, flux_group, var_group):
+                grads = grad_fn(z, init_full_group, fixed_vals_group, flux_group, var_group)  # (g,k)
+                updates, opt_state = opt.update(grads, opt_state, z)
+                z = optax.apply_updates(z, updates)
+                return z, opt_state
+
+            # run optimization for n_iter steps (you can tune n_iter for speed)
+            # If n_iter is a list in two-stage, pick appropriate stage length. Here use int.
+            nit = int(n_iter) if not isinstance(n_iter, (list, tuple)) else int(n_iter[0])
+            for it in trange(nit):
+                z, opt_state = adam_step(z, opt_state, init_full_group_jnp, fixed_vals_for_solver_jnp, flux_group_jnp, var_group_jnp)
+
+            # Reconstruct full standardized labels for this group
+            z_np = np.array(z)  # (gsize, k)
+            full_group = np.array(init_full_group_jnp)  # numpy copy
+            for ii in range(len(idx_arr)):
+                full_group[ii, free_idx] = z_np[ii]
+                if fv_std is not None:
+                    full_group[ii, m_bool] = np.array(fv_std_jnp[idx_arr[ii]])[m_bool]
+            labels_std_out[idx_arr] = full_group
+
+        # Convert to physical and return
+        labels_final = labels_std_out * label_std + label_mean
+        return labels_final
 
     if optimizer == 'two-stage' or optimizer == 'adam':
         # do adam and save as init if two-stage warmup
@@ -678,7 +897,7 @@ def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
     axes = axes.ravel()
 
     label_bounds = {
-        'teff': (3500, 7500),
+        'teff': (2500, 7500),
         'logg': (0.5, 5.5),
         'm_h': (-2.5, 0.75),
         'alpha_h': (-0.5, 0.6)
@@ -735,7 +954,7 @@ def plot_comparison(true_labels, inferred_labels, label_names, save_path):
     axes = axes.ravel()
 
     label_bounds = {
-        'teff': (3500, 7500),
+        'teff': (2500, 7500),
         'logg': (0.5, 5.5),
         'm_h': (-2.5, 0.75),
         'alpha_h': (-0.5, 0.6)
@@ -938,7 +1157,7 @@ def kiel_diagram(y_test: np.ndarray,
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
-    binsx = np.linspace(4000, 7500, 100)
+    binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), 7500, 100)
     binsy = np.linspace(0, 5, 100)
 
     if fe_h:
@@ -1130,13 +1349,19 @@ if __name__ == '__main__':
     learning_rate = 0.001 # 0.1 is too aggressive
     print_every = 1000
     convert_alpha = False  # if True, convert to alpha/h
+    add_WBs = True  # if to run with wide binaries
+    if add_WBs:
+        append_wb = '_w_wide_binaries'
+        data_file_wb = 'boss_apogee_wide_binary_training_data.npz'
+    else:
+        append_wb = ''
 
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        output_dir = 'nmf_joint_results_with_scatter_K32'
+        output_dir = f'nmf_joint_results_with_scatter_K32{append_wb}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        output_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
+        output_dir = f'nmf_joint_results_with_scatter_K32_alpha_m{append_wb}'
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -1155,6 +1380,10 @@ if __name__ == '__main__':
     print("\n[1/4] Loading data...")
     absorption, flux, ivar, true_labels = load_data(data_file,
                                                     convert_alpha=convert_alpha)
+    if add_WBs:
+        absorption_wb, flux_wb, ivar_wb, true_labels_wb = load_data(
+            data_file_wb,
+            convert_alpha=convert_alpha)
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
@@ -1175,13 +1404,72 @@ if __name__ == '__main__':
             random_seed=42, ranges=ranges)
     else:
         idx_train = np.arange(len(true_labels))
-    inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
-        flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
-        n_iter=n_iter,
-        learning_rate=learning_rate,
-        print_every=print_every,
-        seed=42
-    )
+    if add_WBs:
+        # append the WBs
+        absorption = np.append(absorption, absorption_wb, axis=0)
+        flux = np.append(flux, flux_wb, axis=0)
+        ivar = np.append(ivar, ivar_wb, axis=0)
+        true_labels = np.append(true_labels, true_labels_wb, axis=0)
+        labels_mask = np.isfinite(true_labels)
+        init_stars = np.all(labels_mask, axis=1)
+
+
+        per_label_weights = np.zeros_like(true_labels) + 1.
+        per_label_weights[~labels_mask] = 0.01  # little wait to missing, mostly learned
+
+        # add some WBs to training set
+        rng = np.random.default_rng(seed=42)
+        id_bins = np.arange(n_stars, len(flux), 1)
+        idx_train_bin = rng.choice(
+            id_bins,
+            size=int(len(id_bins) * 0.8), replace=False)
+        
+        idx_train = np.append(idx_train, idx_train_bin)
+
+        # start with non-nan
+        label_mean0 = np.nanmean(true_labels[idx_train], axis=0)
+        label_std0 = np.nanstd(true_labels[idx_train], axis=0)
+        init_true_labels = true_labels.copy()
+        init_true_labels[~labels_mask] = 4.5  # for now this assumes logg missing
+        inferred_labels0, theta0, H0, W0, label_mean0, label_std0, losses0, scatter0 = joint_optimization(
+            flux[idx_train],
+            ivar[idx_train],
+            init_true_labels[idx_train],
+            K,
+            per_label_weights=per_label_weights[idx_train],
+            n_iter=5_000,
+            learning_rate=learning_rate,
+            print_every=print_every,
+            seed=42,
+            label_mean=label_mean0,
+            label_std=label_std0
+        )
+
+        # now do EM
+        inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization_with_em(
+            flux[idx_train], ivar[idx_train],
+            true_labels[idx_train],
+            labels_mask[idx_train],
+            theta0, H0, K,
+            label_mean0, label_std0,
+            scatter0,
+            infer_kwargs={'learning_rate': 0.01},
+            joint_kwargs={'n_iter': 3_000,
+                          'learning_rate': learning_rate,
+                          'print_every': print_every,
+                          'seed': 42,
+                          'per_label_weights': per_label_weights[idx_train]},
+            em_iters=4,
+            em_adam_iters=500,
+        )
+    else:
+        inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
+            flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
+            n_iter=n_iter,
+            learning_rate=learning_rate,
+            print_every=print_every,
+            seed=42
+        )
 
     # Compute statistics
     print("\n[3/4] Computing statistics...")
@@ -1253,9 +1541,14 @@ if __name__ == '__main__':
     print('"Training Ridge Regression to use as initial guesser...')
 
     # train model
+    # if WBs, replace nan log(g) with infered
+    labels_ridge = true_labels[idx_train].copy()
+    if add_WBs:
+        mask = labels_mask[idx_train]
+        labels_ridge[~mask] = inferred_labels[~mask]
     W_train = compute_nmf_weights(flux[idx_train], H)
     model_path = f'{output_dir}/nmf_ridge_model.npz'
-    train_and_save_ridge_model(W_train, true_labels[idx_train],
+    train_and_save_ridge_model(W_train, labels_ridge,
                                save_path=model_path, alpha=1.)
     # predict from this model
     W_train = compute_nmf_weights(test_flux, H)
