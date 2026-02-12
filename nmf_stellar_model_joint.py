@@ -1158,7 +1158,7 @@ def kiel_diagram(y_test: np.ndarray,
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
     binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), 7500, 100)
-    binsy = np.linspace(0, 5, 100)
+    binsy = np.linspace(0, 5.5, 100)
 
     if fe_h:
         H_weights, xedges, yedges = np.histogram2d(y_test[:, label_names.index('teff')],
@@ -1350,6 +1350,7 @@ if __name__ == '__main__':
     print_every = 1000
     convert_alpha = False  # if True, convert to alpha/h
     add_WBs = True  # if to run with wide binaries
+    remove_nans = True  # if to remove nans from wide binary dataset
     if add_WBs:
         append_wb = '_w_wide_binaries'
         data_file_wb = 'boss_apogee_wide_binary_training_data.npz'
@@ -1384,6 +1385,21 @@ if __name__ == '__main__':
         absorption_wb, flux_wb, ivar_wb, true_labels_wb = load_data(
             data_file_wb,
             convert_alpha=convert_alpha)
+    if remove_nans:  # combine data now if not doing EM
+        # append the WBs
+        absorption = np.append(absorption, absorption_wb, axis=0)
+        flux = np.append(flux, flux_wb, axis=0)
+        ivar = np.append(ivar, ivar_wb, axis=0)
+        true_labels = np.append(true_labels, true_labels_wb, axis=0)
+
+        # remove nans
+        labels_mask = np.isfinite(true_labels)
+        keep_stars = np.all(labels_mask, axis=1)
+        absorption = absorption[keep_stars]
+        flux = flux[keep_stars]
+        ivar = ivar[keep_stars]
+        true_labels = true_labels[keep_stars]
+    
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
@@ -1392,30 +1408,34 @@ if __name__ == '__main__':
     # get training subsample
     train_w_subsample = True
     if train_w_subsample:
-        nbins = 15
-        nstars_per_bin = 7
-        ranges = [[4000, 6500],
-                [1, 5],
-                [-2, 0.5],
-                [-0.1, 0.3]]
+        if add_WBs and remove_nans:
+            nbins = 16
+            nstars_per_bin = 7
+            ranges = [[3000, 6500],
+                      [1, 5.25],
+                      [-2, 0.5],
+                      [-0.1, 0.3]]
+        else:
+            nbins = 15
+            nstars_per_bin = 7
+            ranges = [[4000, 6500],
+                      [1, 5],
+                      [-2, 0.5],
+                      [-0.1, 0.3]]
         idx_train = unf_training_sample(
             true_labels,
             nbins, nstars_per_bin,
             random_seed=42, ranges=ranges)
     else:
         idx_train = np.arange(len(true_labels))
-    if add_WBs:
-        # append the WBs
+    if add_WBs and not remove_nans:
+        print("\nRunning EM-style joint optimization...")
         absorption = np.append(absorption, absorption_wb, axis=0)
         flux = np.append(flux, flux_wb, axis=0)
         ivar = np.append(ivar, ivar_wb, axis=0)
         true_labels = np.append(true_labels, true_labels_wb, axis=0)
         labels_mask = np.isfinite(true_labels)
         init_stars = np.all(labels_mask, axis=1)
-
-
-        per_label_weights = np.zeros_like(true_labels) + 1.
-        per_label_weights[~labels_mask] = 0.01  # little wait to missing, mostly learned
 
         # add some WBs to training set
         rng = np.random.default_rng(seed=42)
@@ -1425,6 +1445,9 @@ if __name__ == '__main__':
             size=int(len(id_bins) * 0.8), replace=False)
         
         idx_train = np.append(idx_train, idx_train_bin)
+
+        per_label_weights = np.zeros_like(true_labels) + 1.
+        per_label_weights[~labels_mask] = 0.01  # little wait to missing, mostly learned
 
         # start with non-nan
         label_mean0 = np.nanmean(true_labels[idx_train], axis=0)
@@ -1455,14 +1478,15 @@ if __name__ == '__main__':
             scatter0,
             infer_kwargs={'learning_rate': 0.01},
             joint_kwargs={'n_iter': 3_000,
-                          'learning_rate': learning_rate,
-                          'print_every': print_every,
-                          'seed': 42,
-                          'per_label_weights': per_label_weights[idx_train]},
+                        'learning_rate': learning_rate,
+                        'print_every': print_every,
+                        'seed': 42,
+                        'per_label_weights': per_label_weights[idx_train]},
             em_iters=4,
             em_adam_iters=500,
         )
     else:
+        print("\nRunning nominal joint optimization...")
         inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
             flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
             n_iter=n_iter,
