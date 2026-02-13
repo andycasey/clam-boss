@@ -23,6 +23,8 @@ from matplotlib.colors import LogNorm
 import warnings
 from tqdm import tqdm, trange
 from sklearn.decomposition import NMF
+import configparser
+import shutil
 
 jax.config.update("jax_enable_x64", True)
 
@@ -1343,14 +1345,20 @@ def unf_training_sample(true_labels, nbins,
 
 if __name__ == '__main__':
     # Configuration
-    data_file = 'boss_apogee_lux_training_data.npz'
-    K = 160
-    n_iter = 10_000
-    learning_rate = 0.001 # 0.1 is too aggressive
-    print_every = 1000
-    convert_alpha = False  # if True, convert to alpha/h
-    add_WBs = True  # if to run with wide binaries
-    remove_nans = True  # if to remove nans from wide binary dataset
+    config = configparser.ConfigParser()
+    default_cfg = 'default.cfg'
+    config.read(default_cfg)
+
+    K = config.getint('settings', 'K')
+    n_iter = config.getint('settings', 'n_iter')
+    learning_rate = config.getfloat('settings', 'learning_rate')
+    print_every = config.getint('settings', 'print_every')
+    convert_alpha = config.getboolean('settings', 'convert_alpha')
+    add_WBs = config.getboolean('settings', 'add_WBs')
+    remove_nans = config.getboolean('settings', 'remove_nans')
+    train_w_subsample = config.getboolean('settings', 'train_w_subsample')
+
+    # run code
     if add_WBs:
         append_wb = '_w_wide_binaries'
         data_file_wb = 'boss_apogee_wide_binary_training_data.npz'
@@ -1367,6 +1375,8 @@ if __name__ == '__main__':
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
+    # save current cfg file
+    shutil.copy(default_cfg, output_dir)
 
     print("=" * 60)
     print("Joint NMF Stellar Spectra Model")
@@ -1379,6 +1389,7 @@ if __name__ == '__main__':
 
     # Load data
     print("\n[1/4] Loading data...")
+    data_file = 'boss_apogee_lux_training_data.npz'
     absorption, flux, ivar, true_labels = load_data(data_file,
                                                     convert_alpha=convert_alpha)
     if add_WBs:
@@ -1406,7 +1417,6 @@ if __name__ == '__main__':
     # Joint optimization
     print("\n[2/4] Running joint optimization...")
     # get training subsample
-    train_w_subsample = True
     if train_w_subsample:
         if add_WBs and remove_nans:
             nbins = 16
