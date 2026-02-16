@@ -7,6 +7,7 @@ from nmf_stellar_model_joint import (infer_labels, plot_spectra_comparison,
 import warnings
 import matplotlib.colors as colors
 import matplotlib.cm as cm
+import configparser
 
 
 def load_data(file_path, open_clusters):
@@ -161,6 +162,38 @@ def plot_compare_clusers(mean_fe_h_plot,
 
 if __name__ == '__main__':
     # Configuration
+    config = configparser.ConfigParser()
+    base_dir = 'nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS'
+    default_cfg = f'{base_dir}/default.cfg'
+    config.read(default_cfg)
+
+    K = config.getint('settings', 'K')
+    n_iter = config.getint('settings', 'n_iter')
+    learning_rate = config.getfloat('settings', 'learning_rate')
+    print_every = config.getint('settings', 'print_every')
+    convert_alpha = config.getboolean('settings', 'convert_alpha')
+    add_WBs = config.getboolean('settings', 'add_WBs')
+    add_MS = config.getboolean('settings', 'add_MS')
+    add_HS = config.getboolean('settings', 'add_HS')
+    remove_nans = config.getboolean('settings', 'remove_nans')
+    train_w_subsample = config.getboolean('settings', 'train_w_subsample')
+
+    # run code
+    if add_WBs:
+        append_wb = '_w_wide_binaries'
+    else:
+        append_wb = ''
+
+    if add_MS:
+        append_ms = '_w_MS'
+    else:
+        append_ms = ''
+
+    if add_HS:
+        append_hs = '_w_HS'
+    else:
+        append_hs = ''
+
     # do open clusters first
     open_clusters = True
     if open_clusters:
@@ -169,20 +202,16 @@ if __name__ == '__main__':
     else:
         data_file = 'boss_gc_stars_data.npz'
         dir_start = 'boss_gc_validation'
-    K = 32
-    n_iter = 10_000
-    learning_rate = 0.01 # 0.1 is too aggressive
-    print_every = 1000
 
-    convert_alpha = False
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        save_dir = 'nmf_joint_results_with_scatter_K32'
-        output_dir = f'{dir_start}'
+        save_dir = base_dir
+        output_dir = f'{dir_start}_{append_wb}{append_ms}{append_hs}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        save_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
-        output_dir = f'{dir_start}_alpha_m'
+        save_dir = base_dir
+        output_dir = f'{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}'
+    
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
@@ -288,12 +317,12 @@ if __name__ == '__main__':
 
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        save_dir = 'nmf_joint_results_with_scatter_K32'
-        output_dir = f'{dir_start}'
+        save_dir = base_dir
+        output_dir = f'{dir_start}_{append_wb}{append_ms}{append_hs}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        save_dir = 'nmf_joint_results_with_scatter_K32_alpha_m'
-        output_dir = f'{dir_start}_alpha_m'
+        save_dir = base_dir
+        output_dir = f'{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}'
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")

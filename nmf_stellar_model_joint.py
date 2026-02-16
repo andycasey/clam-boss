@@ -148,7 +148,8 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
                        per_label_weights=None,
                        label_mean=None, label_std=None,
                        scatter=None,
-                       theta=None, H=None):
+                       theta=None, H=None,
+                       logger=None):
     """
     Jointly optimize stellar labels, polynomial coefficients, and NMF basis.
 
@@ -179,11 +180,12 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     n_labels = init_labels.shape[1]
     n_features = 1 + n_labels + n_labels + n_labels * (n_labels - 1) // 2  # 15
 
-    logger.info(f"Joint optimization setup:")
-    logger.info(f"  Stars: {n_stars}, Wavelengths: {n_wavelengths}")
-    logger.info(f"  K = {K} components")
-    logger.info(f"  Design matrix features: {n_features}")
-    logger.info(f"  Total parameters: {n_stars * n_labels + n_features * K + K * n_wavelengths:,}")
+    if logger is not None:
+        logger.info(f"Joint optimization setup:")
+        logger.info(f"  Stars: {n_stars}, Wavelengths: {n_wavelengths}")
+        logger.info(f"  K = {K} components")
+        logger.info(f"  Design matrix features: {n_features}")
+        logger.info(f"  Total parameters: {n_stars * n_labels + n_features * K + K * n_wavelengths:,}")
 
     # Standardize labels
     if label_mean is None:
@@ -298,11 +300,13 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
     # Initial loss
     initial_loss = float(loss_fn(params))
-    logger.info(f"  Initial loss: {initial_loss:.6e}")
+    if logger is not None:
+        logger.info(f"  Initial loss: {initial_loss:.6e}")
 
     # Optimization loop
     losses = []
-    logger.info(f"\nOptimizing for {n_iter} iterations...")
+    if logger is not None:
+        logger.info(f"\nOptimizing for {n_iter} iterations...")
 
     with tqdm(total=n_iter) as pb:
 
@@ -315,7 +319,8 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
             pb.update()
 
     final_loss = float(loss_fn(params))
-    logger.info(f"  Final loss: {final_loss:.6e}")
+    if logger is not None:
+        logger.info(f"  Final loss: {final_loss:.6e}")
 
     # Extract final parameters
     labels_std_final = np.array(params['labels_std'])
@@ -435,11 +440,13 @@ def compute_nmf_weights(flux, H):
 
 
 def save_ridge_model_npz(ridge_model, W_scaler, label_scaler, 
-                         save_path='nmf_ridge_model.npz'):
+                         save_path='nmf_ridge_model.npz',
+                         logger=None):
     """
     Save Ridge model as numpy arrays in NPZ format.
     """
-    logger.info(f"Saving Ridge model to {save_path}...")
+    if logger is not None:
+        logger.info(f"Saving Ridge model to {save_path}...")
     
     # Extract the actual parameters (just numpy arrays!)
     model_params = {
@@ -461,14 +468,15 @@ def save_ridge_model_npz(ridge_model, W_scaler, label_scaler,
 
 
 def train_and_save_ridge_model(W_train, train_labels, save_path='nmf_ridge_model.npz',
-                               alpha=1.0):
+                               alpha=1.0, logger=None):
     """
     Train and save ridge model used for initial guess
     """
     from sklearn.linear_model import Ridge
     from sklearn.preprocessing import StandardScaler
     
-    logger.info("Training Ridge regression...")
+    if logger is not None:
+        logger.info("Training Ridge regression...")
     
     # Fit scalers
     W_scaler = StandardScaler()
@@ -482,9 +490,10 @@ def train_and_save_ridge_model(W_train, train_labels, save_path='nmf_ridge_model
     ridge.fit(W_train_scaled, labels_scaled)
     
     # save model
-    save_ridge_model_npz(ridge, W_scaler, label_scaler, save_path)
+    save_ridge_model_npz(ridge, W_scaler, label_scaler, save_path, logger=logger)
     
-    logger.info(f"\nModel saved to {save_path}")
+    if logger is not None:
+        logger.info(f"\nModel saved to {save_path}")
     
     return
 
@@ -528,7 +537,8 @@ def predict_with_ridge_npz(W, model_params):
 def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labels_std=None,
                  n_iter=2000, learning_rate=0.05, seed=42, optimizer='adam',
                  grid_points=5, grid_range=(-3.0, 3.0),
-                 fixed_mask=None, fixed_values_phys=None):
+                 fixed_mask=None, fixed_values_phys=None,
+                 logger=None):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -586,7 +596,8 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     n_stars, n_wavelengths = flux.shape
     n_labels = len(label_mean)
 
-    logger.info(f"Inferring labels for {n_stars} stars using {optimizer.upper()}...")
+    if logger is not None:
+        logger.info(f"Inferring labels for {n_stars} stars using {optimizer.upper()}...")
 
     # Convert to JAX arrays
     flux_jnp = jnp.array(flux)
@@ -612,16 +623,19 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     if init_labels_std is None:
         # Build the grid once (shared across all stars)
         if isinstance(grid_range, tuple):
-            logger.info(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
+            if logger is not None:
+                logger.info(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
             grid_1d = jnp.linspace(grid_range[0], grid_range[1], grid_points)
             grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
         else:
-            logger.info(f"  Performing batched grid search {np.prod(grid_points)} points per star)...")
+            if logger is not None:
+                logger.info(f"  Performing batched grid search {np.prod(grid_points)} points per star)...")
             grid_1d = [jnp.linspace(grid_range[i][0], grid_range[i][1], grid_points[i]) for i in range(len(grid_range))]
             grid_points_all = jnp.array(list(product(*grid_1d)))
         n_grid = len(grid_points_all)
         
-        logger.info(f"    Grid has {n_grid:,} points")
+        if logger is not None:
+            logger.info(f"    Grid has {n_grid:,} points")
         
         # Define the grid search function for a single star
         @jit
@@ -641,7 +655,8 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         n_batches = (n_stars + batch_size - 1) // batch_size
         init_labels_std = np.zeros((n_stars, n_labels))
         
-        logger.info(f"    Processing {n_stars} stars in {n_batches} batches of ~{batch_size}...")
+        if logger is not None:
+            logger.info(f"    Processing {n_stars} stars in {n_batches} batches of ~{batch_size}...")
         
         for i in tqdm(range(n_batches), desc="Grid search batches"):
             start_idx = i * batch_size
@@ -654,7 +669,8 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
             )
             init_labels_std[start_idx:end_idx] = np.array(batch_result)
         
-        logger.info(f"  Grid search complete.")
+        if logger is not None:
+            logger.info(f"  Grid search complete.")
 
     # add option for when some are fixed during EM-style joint opt
     if fixed_mask is not None:
@@ -820,7 +836,8 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         except ImportError:
             raise ImportError("Install jaxopt: pip install jaxopt")
         
-        logger.info(f"  Running L-BFGS-B optimization (GPU-accelerated)...")
+        if logger is not None:
+            logger.info(f"  Running L-BFGS-B optimization (GPU-accelerated)...")
         labels_std_final = np.zeros((n_stars, n_labels))
         
         # Create solver
@@ -908,7 +925,8 @@ def plot_test_comparison(true_labels, inferred_labels,
                             'logg': (0.5, 5.5),
                             'm_h': (-4., 0.75),
                             'alpha_h': (-0.5, 0.6)
-                         }):
+                         },
+                         logger=None):
     """Create comparison plots of true vs inferred labels for test set."""
     n_labels = true_labels.shape[1]
 
@@ -942,7 +960,8 @@ def plot_test_comparison(true_labels, inferred_labels,
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    logger.info(f"Saved test comparison plot to {save_path}")
+    if logger is not None:
+        logger.info(f"Saved test comparison plot to {save_path}")
 
 
 def compute_label_statistics(true_labels, inferred_labels, label_names):
@@ -1127,7 +1146,6 @@ def plot_spectra_comparison(flux, ivar, true_labels, inferred_labels,
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    logger.info(f"Saved spectra comparison to {save_path}")
 
 
 def plot_residual_histograms(true_labels, inferred_labels, label_names, save_path):
@@ -1165,7 +1183,8 @@ def kiel_diagram(y_test: np.ndarray,
                  save_dir: str,
                  fe_h=False,
                  teff_max=20000,
-                 feh_min=-3):
+                 feh_min=-3,
+                 name_append=''):
     """
     make a kiel diagram for test and predicted
     """
@@ -1229,9 +1248,9 @@ def kiel_diagram(y_test: np.ndarray,
     ax2.invert_xaxis()
     ax2.invert_yaxis()
     if fe_h:
-        plt.savefig(f'{save_dir}/kiel_diagram_fe_h.png')
+        plt.savefig(f'{save_dir}/kiel_diagram_fe_h{name_append}.png')
     else:
-        plt.savefig(f'{save_dir}/kiel_diagram.png')
+        plt.savefig(f'{save_dir}/kiel_diagram{name_append}.png')
     plt.close()
 
 
@@ -1240,7 +1259,8 @@ def alpha_fe_plot(y_test: np.ndarray,
                   label_names: list,
                   save_dir: str,
                   convert_alpha: bool,
-                  feh_min: float = -3.):
+                  feh_min: float = -3.,
+                  name_append=''):
     """
     Make plot of alpha/M vs Fe/H for test and predicted
     """
@@ -1276,7 +1296,7 @@ def alpha_fe_plot(y_test: np.ndarray,
     ax2.set_title('Predictions')
     ax2.set_xlabel('Fe/H')
     ax2.set_ylabel('alpha/M')
-    plt.savefig(f'{save_dir}/alpha_m_vs_fe_h.png')
+    plt.savefig(f'{save_dir}/alpha_m_vs_fe_h{name_append}.png')
     plt.close()
 
 
@@ -1564,7 +1584,8 @@ if __name__ == '__main__':
             print_every=print_every,
             seed=42,
             label_mean=label_mean0,
-            label_std=label_std0
+            label_std=label_std0,
+            logger=logger
         )
 
         # now do EM
@@ -1580,7 +1601,8 @@ if __name__ == '__main__':
                         'learning_rate': learning_rate,
                         'print_every': print_every,
                         'seed': 42,
-                        'per_label_weights': per_label_weights[idx_train]},
+                        'per_label_weights': per_label_weights[idx_train],
+                        'logger': logger},
             em_iters=4,
             em_adam_iters=500,
         )
@@ -1616,7 +1638,8 @@ if __name__ == '__main__':
             learning_rate=learning_rate,
             print_every=print_every,
             seed=42,
-            per_label_weights=per_label_weights[idx_train]
+            per_label_weights=per_label_weights[idx_train],
+            logger=logger
         )
 
     # Compute statistics
@@ -1697,7 +1720,8 @@ if __name__ == '__main__':
     W_train = compute_nmf_weights(flux[idx_train], H)
     model_path = f'{output_dir}/nmf_ridge_model.npz'
     train_and_save_ridge_model(W_train, labels_ridge,
-                               save_path=model_path, alpha=1.)
+                               save_path=model_path, alpha=1.,
+                               logger=logger)
     # predict from this model
     W_train = compute_nmf_weights(test_flux, H)
     init_labels = predict_with_ridge_npz(W_train, load_ridge_model_npz(model_path=model_path))
@@ -1726,7 +1750,8 @@ if __name__ == '__main__':
         learning_rate=0.01,
         optimizer='two-stage',
         grid_points=None,
-        grid_range=None
+        grid_range=None,
+        logger=logger
     )
 
     # Compute test statistics
