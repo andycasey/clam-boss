@@ -901,19 +901,19 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     return labels_final
 
 
-def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
+def plot_test_comparison(true_labels, inferred_labels,
+                         label_names, save_path,
+                         label_bounds={
+                            'teff': (2500, 20000),
+                            'logg': (0.5, 5.5),
+                            'm_h': (-4., 0.75),
+                            'alpha_h': (-0.5, 0.6)
+                         }):
     """Create comparison plots of true vs inferred labels for test set."""
     n_labels = true_labels.shape[1]
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
     axes = axes.ravel()
-
-    label_bounds = {
-        'teff': (2500, 20000),
-        'logg': (0.5, 5.5),
-        'm_h': (-4., 0.75),
-        'alpha_h': (-0.5, 0.6)
-    }
 
     for i, (ax, name) in enumerate(zip(axes, label_names)):
         true_vals = true_labels[:, i]
@@ -958,19 +958,19 @@ def compute_label_statistics(true_labels, inferred_labels, label_names):
     return stats
 
 
-def plot_comparison(true_labels, inferred_labels, label_names, save_path):
+def plot_comparison(true_labels, inferred_labels,
+                    label_names, save_path,
+                    label_bounds = {
+                        'teff': (2500, 20000),
+                        'logg': (0.5, 5.5),
+                        'm_h': (-4., 0.75),
+                        'alpha_h': (-0.5, 0.6)
+                    }):
     """Create comparison plots of true vs inferred labels."""
     n_labels = true_labels.shape[1]
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
     axes = axes.ravel()
-
-    label_bounds = {
-        'teff': (2500, 20000),
-        'logg': (0.5, 5.5),
-        'm_h': (-4., 0.75),
-        'alpha_h': (-0.5, 0.6)
-    }
 
     for i, (ax, name) in enumerate(zip(axes, label_names)):
         true_vals = true_labels[:, i]
@@ -1163,13 +1163,15 @@ def kiel_diagram(y_test: np.ndarray,
                  predictions: np.ndarray,
                  label_names: list,
                  save_dir: str,
-                 fe_h=False):
+                 fe_h=False,
+                 teff_max=20000,
+                 feh_min=-3):
     """
     make a kiel diagram for test and predicted
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
-    binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), 20000, 100)
+    binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), teff_max, 100)
     binsy = np.linspace(0, 5.5, 100)
 
     if fe_h:
@@ -1187,7 +1189,7 @@ def kiel_diagram(y_test: np.ndarray,
 
         res = ax1.imshow(weighted_average.T, origin='lower', aspect='auto',
                          extent=(binsx.min(), binsx.max(), binsy.min(), binsy.max()), cmap='inferno',
-                        vmin=-3, vmax=0.3)
+                        vmin=feh_min, vmax=0.3)
         plt.colorbar(res, label='[Fe/H]', ax=ax1)
     else:
         res = ax1.hist2d(y_test[:, label_names.index('teff')], y_test[:, label_names.index('logg')],
@@ -1214,7 +1216,7 @@ def kiel_diagram(y_test: np.ndarray,
 
         res = ax2.imshow(weighted_average.T, origin='lower', aspect='auto',
                          extent=(binsx.min(), binsx.max(), binsy.min(), binsy.max()), cmap='inferno',
-                        vmin=-3, vmax=0.3)
+                        vmin=feh_min, vmax=0.3)
         plt.colorbar(res, label='[Fe/H]', ax=ax2)
     else:
         res = ax2.hist2d(predictions[:, label_names.index('teff')], predictions[:, label_names.index('logg')],
@@ -1237,13 +1239,14 @@ def alpha_fe_plot(y_test: np.ndarray,
                   predictions: np.ndarray,
                   label_names: list,
                   save_dir: str,
-                  convert_alpha: bool):
+                  convert_alpha: bool,
+                  feh_min: float = -3.):
     """
     Make plot of alpha/M vs Fe/H for test and predicted
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
-    binsx = np.linspace(-4, 0.5, 100)
+    binsx = np.linspace(feh_min, 0.5, 100)
     binsy = np.linspace(-0.4, 0.5, 100)
 
     if convert_alpha:
