@@ -25,6 +25,7 @@ from tqdm import tqdm, trange
 from sklearn.decomposition import NMF
 import configparser
 import shutil
+import logging
 
 jax.config.update("jax_enable_x64", True)
 
@@ -178,11 +179,11 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     n_labels = init_labels.shape[1]
     n_features = 1 + n_labels + n_labels + n_labels * (n_labels - 1) // 2  # 15
 
-    print(f"Joint optimization setup:")
-    print(f"  Stars: {n_stars}, Wavelengths: {n_wavelengths}")
-    print(f"  K = {K} components")
-    print(f"  Design matrix features: {n_features}")
-    print(f"  Total parameters: {n_stars * n_labels + n_features * K + K * n_wavelengths:,}")
+    logger.info(f"Joint optimization setup:")
+    logger.info(f"  Stars: {n_stars}, Wavelengths: {n_wavelengths}")
+    logger.info(f"  K = {K} components")
+    logger.info(f"  Design matrix features: {n_features}")
+    logger.info(f"  Total parameters: {n_stars * n_labels + n_features * K + K * n_wavelengths:,}")
 
     # Standardize labels
     if label_mean is None:
@@ -197,8 +198,19 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     #W_init = np.random.uniform(0, 1, size=W_init.shape)
     #H_init = np.random.uniform(0, 1, size=H_init.shape)
 
+    # sets nan to label means
+    init_labels_std_no_nan = init_labels_std.copy()
+    nan_mask = np.isnan(init_labels_std_no_nan)
+    init_labels_std_no_nan[nan_mask] = np.take(label_mean, np.where(nan_mask)[1])
+    # auto downweight all nanmask
+    if per_label_weights is None:
+        per_label_weights_jnp = jnp.zeros_like(init_labels_std_jnp) + 1.
+    else:
+        per_label_weights_jnp = jnp.array(per_label_weights)
+    per_label_weights_jnp = jnp.where(nan_mask, 0., per_label_weights_jnp)
+
     # Initialize theta from initial W and labels
-    design_matrix = build_design_matrix_np(init_labels_std)
+    design_matrix = build_design_matrix_np(init_labels_std_no_nan)
     raw_target = np.log(np.expm1(np.maximum(W_init, 1e-8)))
     theta_init, _, _, _ = np.linalg.lstsq(design_matrix, raw_target, rcond=None)
 
@@ -209,11 +221,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     var_jnp = 1.0/jnp.maximum(ivar, 1e-16)
     label_mean_jnp = jnp.array(label_mean)
     label_std_jnp = jnp.array(label_std)
-    init_labels_std_jnp = jnp.array(init_labels_std)
-    if per_label_weights is None:
-        per_label_weights_jnp = jnp.zeros_like(init_labels_std_jnp) + 1.
-    else:
-        per_label_weights_jnp = jnp.array(per_label_weights)
+    init_labels_std_jnp = jnp.array(init_labels_std_no_nan)
 
     # Parameters to optimize (all unconstrained, we'll apply constraints in forward pass)
     # Use log-space for H to ensure positivity
@@ -226,7 +234,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
     else:
         ln_scatter_init = 0.1 * jnp.ones(n_wavelengths) # initialize scatter params
     params = {
-        'labels_std': jnp.array(init_labels_std),
+        'labels_std': jnp.array(init_labels_std_no_nan),
         'theta': jnp.array(theta_init),
         'log_H': jnp.log(jnp.array(H_init) + 1e-10),
         'ln_scatter': ln_scatter_init
@@ -267,7 +275,9 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
         # Label loss: penalize deviation from initial labels (normalized by number of labels)
         label_residual = params['labels_std'] - init_labels_std_jnp
-        label_loss = jnp.sum(per_label_weights_jnp * (label_residual ** 2)) / (n_stars * n_labels)
+        # only count those that contribute to loss
+        ncontrib = jnp.sum(per_label_weights_jnp > 0)
+        label_loss = jnp.nansum(per_label_weights_jnp * (label_residual ** 2)) / ncontrib # (n_stars * n_labels)
 
         return recon_loss + label_weight * label_loss
 
@@ -288,11 +298,11 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
 
     # Initial loss
     initial_loss = float(loss_fn(params))
-    print(f"  Initial loss: {initial_loss:.6e}")
+    logger.info(f"  Initial loss: {initial_loss:.6e}")
 
     # Optimization loop
     losses = []
-    print(f"\nOptimizing for {n_iter} iterations...")
+    logger.info(f"\nOptimizing for {n_iter} iterations...")
 
     with tqdm(total=n_iter) as pb:
 
@@ -305,7 +315,7 @@ def joint_optimization(flux, ivar, init_labels, K, n_iter=5000, learning_rate=0.
             pb.update()
 
     final_loss = float(loss_fn(params))
-    print(f"  Final loss: {final_loss:.6e}")
+    logger.info(f"  Final loss: {final_loss:.6e}")
 
     # Extract final parameters
     labels_std_final = np.array(params['labels_std'])
@@ -429,7 +439,7 @@ def save_ridge_model_npz(ridge_model, W_scaler, label_scaler,
     """
     Save Ridge model as numpy arrays in NPZ format.
     """
-    print(f"Saving Ridge model to {save_path}...")
+    logger.info(f"Saving Ridge model to {save_path}...")
     
     # Extract the actual parameters (just numpy arrays!)
     model_params = {
@@ -458,7 +468,7 @@ def train_and_save_ridge_model(W_train, train_labels, save_path='nmf_ridge_model
     from sklearn.linear_model import Ridge
     from sklearn.preprocessing import StandardScaler
     
-    print("Training Ridge regression...")
+    logger.info("Training Ridge regression...")
     
     # Fit scalers
     W_scaler = StandardScaler()
@@ -474,7 +484,7 @@ def train_and_save_ridge_model(W_train, train_labels, save_path='nmf_ridge_model
     # save model
     save_ridge_model_npz(ridge, W_scaler, label_scaler, save_path)
     
-    print(f"\nModel saved to {save_path}")
+    logger.info(f"\nModel saved to {save_path}")
     
     return
 
@@ -576,7 +586,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     n_stars, n_wavelengths = flux.shape
     n_labels = len(label_mean)
 
-    print(f"Inferring labels for {n_stars} stars using {optimizer.upper()}...")
+    logger.info(f"Inferring labels for {n_stars} stars using {optimizer.upper()}...")
 
     # Convert to JAX arrays
     flux_jnp = jnp.array(flux)
@@ -602,16 +612,16 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
     if init_labels_std is None:
         # Build the grid once (shared across all stars)
         if isinstance(grid_range, tuple):
-            print(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
+            logger.info(f"  Performing batched grid search ({grid_points}^{n_labels} = {grid_points**n_labels} points per star)...")
             grid_1d = jnp.linspace(grid_range[0], grid_range[1], grid_points)
             grid_points_all = jnp.array(list(product(*[grid_1d]*n_labels)))  # (n_grid, n_labels)
         else:
-            print(f"  Performing batched grid search {np.prod(grid_points)} points per star)...")
+            logger.info(f"  Performing batched grid search {np.prod(grid_points)} points per star)...")
             grid_1d = [jnp.linspace(grid_range[i][0], grid_range[i][1], grid_points[i]) for i in range(len(grid_range))]
             grid_points_all = jnp.array(list(product(*grid_1d)))
         n_grid = len(grid_points_all)
         
-        print(f"    Grid has {n_grid:,} points")
+        logger.info(f"    Grid has {n_grid:,} points")
         
         # Define the grid search function for a single star
         @jit
@@ -631,7 +641,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         n_batches = (n_stars + batch_size - 1) // batch_size
         init_labels_std = np.zeros((n_stars, n_labels))
         
-        print(f"    Processing {n_stars} stars in {n_batches} batches of ~{batch_size}...")
+        logger.info(f"    Processing {n_stars} stars in {n_batches} batches of ~{batch_size}...")
         
         for i in tqdm(range(n_batches), desc="Grid search batches"):
             start_idx = i * batch_size
@@ -644,7 +654,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
             )
             init_labels_std[start_idx:end_idx] = np.array(batch_result)
         
-        print(f"  Grid search complete.")
+        logger.info(f"  Grid search complete.")
 
     # add option for when some are fixed during EM-style joint opt
     if fixed_mask is not None:
@@ -810,7 +820,7 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
         except ImportError:
             raise ImportError("Install jaxopt: pip install jaxopt")
         
-        print(f"  Running L-BFGS-B optimization (GPU-accelerated)...")
+        logger.info(f"  Running L-BFGS-B optimization (GPU-accelerated)...")
         labels_std_final = np.zeros((n_stars, n_labels))
         
         # Create solver
@@ -899,9 +909,9 @@ def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
     axes = axes.ravel()
 
     label_bounds = {
-        'teff': (2500, 7500),
+        'teff': (2500, 20000),
         'logg': (0.5, 5.5),
-        'm_h': (-2.5, 0.75),
+        'm_h': (-4., 0.75),
         'alpha_h': (-0.5, 0.6)
     }
 
@@ -932,7 +942,7 @@ def plot_test_comparison(true_labels, inferred_labels, label_names, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved test comparison plot to {save_path}")
+    logger.info(f"Saved test comparison plot to {save_path}")
 
 
 def compute_label_statistics(true_labels, inferred_labels, label_names):
@@ -956,9 +966,9 @@ def plot_comparison(true_labels, inferred_labels, label_names, save_path):
     axes = axes.ravel()
 
     label_bounds = {
-        'teff': (2500, 7500),
+        'teff': (2500, 20000),
         'logg': (0.5, 5.5),
-        'm_h': (-2.5, 0.75),
+        'm_h': (-4., 0.75),
         'alpha_h': (-0.5, 0.6)
     }
 
@@ -987,7 +997,7 @@ def plot_comparison(true_labels, inferred_labels, label_names, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved comparison plot to {save_path}")
+    logger.info(f"Saved comparison plot to {save_path}")
 
 
 def plot_nmf_components(H, save_path):
@@ -1017,7 +1027,7 @@ def plot_nmf_components(H, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved NMF components plot to {save_path}")
+    logger.info(f"Saved NMF components plot to {save_path}")
 
 
 def plot_loss(losses, save_path):
@@ -1041,7 +1051,7 @@ def plot_loss(losses, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved loss plot to {save_path}")
+    logger.info(f"Saved loss plot to {save_path}")
 
 
 def plot_model_scatter(wavelength, scatter, save_path):
@@ -1058,7 +1068,7 @@ def plot_model_scatter(wavelength, scatter, save_path):
     fig.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close("all")
-    print(f"Saved model scatter plot to {save_path}")
+    logger.info(f"Saved model scatter plot to {save_path}")
 
 
 
@@ -1117,7 +1127,7 @@ def plot_spectra_comparison(flux, ivar, true_labels, inferred_labels,
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved spectra comparison to {save_path}")
+    logger.info(f"Saved spectra comparison to {save_path}")
 
 
 def plot_residual_histograms(true_labels, inferred_labels, label_names, save_path):
@@ -1146,7 +1156,7 @@ def plot_residual_histograms(true_labels, inferred_labels, label_names, save_pat
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Saved residual histogram to {save_path}")
+    logger.info(f"Saved residual histogram to {save_path}")
 
 
 def kiel_diagram(y_test: np.ndarray,
@@ -1159,7 +1169,7 @@ def kiel_diagram(y_test: np.ndarray,
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
-    binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), 7500, 100)
+    binsx = np.linspace(np.nanmin(y_test[:, label_names.index('teff')]), 20000, 100)
     binsy = np.linspace(0, 5.5, 100)
 
     if fe_h:
@@ -1177,7 +1187,7 @@ def kiel_diagram(y_test: np.ndarray,
 
         res = ax1.imshow(weighted_average.T, origin='lower', aspect='auto',
                          extent=(binsx.min(), binsx.max(), binsy.min(), binsy.max()), cmap='inferno',
-                        vmin=-1, vmax=0.3)
+                        vmin=-3, vmax=0.3)
         plt.colorbar(res, label='[Fe/H]', ax=ax1)
     else:
         res = ax1.hist2d(y_test[:, label_names.index('teff')], y_test[:, label_names.index('logg')],
@@ -1204,7 +1214,7 @@ def kiel_diagram(y_test: np.ndarray,
 
         res = ax2.imshow(weighted_average.T, origin='lower', aspect='auto',
                          extent=(binsx.min(), binsx.max(), binsy.min(), binsy.max()), cmap='inferno',
-                        vmin=-1, vmax=0.3)
+                        vmin=-3, vmax=0.3)
         plt.colorbar(res, label='[Fe/H]', ax=ax2)
     else:
         res = ax2.hist2d(predictions[:, label_names.index('teff')], predictions[:, label_names.index('logg')],
@@ -1233,8 +1243,8 @@ def alpha_fe_plot(y_test: np.ndarray,
     """
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
 
-    binsx = np.linspace(-2, 0.5, 100)
-    binsy = np.linspace(-0.4, 0.4, 100)
+    binsx = np.linspace(-4, 0.5, 100)
+    binsy = np.linspace(-0.4, 0.5, 100)
 
     if convert_alpha:
         res = ax1.hist2d(y_test[:, label_names.index('m_h')],
@@ -1355,6 +1365,8 @@ if __name__ == '__main__':
     print_every = config.getint('settings', 'print_every')
     convert_alpha = config.getboolean('settings', 'convert_alpha')
     add_WBs = config.getboolean('settings', 'add_WBs')
+    add_MS = config.getboolean('settings', 'add_MS')
+    add_HS = config.getboolean('settings', 'add_HS')
     remove_nans = config.getboolean('settings', 'remove_nans')
     train_w_subsample = config.getboolean('settings', 'train_w_subsample')
 
@@ -1365,33 +1377,76 @@ if __name__ == '__main__':
     else:
         append_wb = ''
 
+    if add_MS:
+        append_ms = '_w_MS'
+        data_file_ms = 'boss_minesweeper_training_data.npz'
+    else:
+        append_ms = ''
+
+    if add_HS:
+        append_hs = '_w_HS'
+        data_file_hs = 'boss_hot_star_training_data.npz'
+    else:
+        append_hs = ''
+
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        output_dir = f'nmf_joint_results_with_scatter_K32{append_wb}'
+        output_dir = f'nmf_joint_results_with_scatter_K32{append_wb}{append_ms}{append_hs}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        output_dir = f'nmf_joint_results_with_scatter_K32_alpha_m{append_wb}'
+        output_dir = f'nmf_joint_results_with_scatter_K32_alpha_m{append_wb}{append_ms}{append_hs}'
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    print(f"Saving results to: {output_dir}/")
     # save current cfg file
     shutil.copy(default_cfg, output_dir)
 
-    print("=" * 60)
-    print("Joint NMF Stellar Spectra Model")
-    print("=" * 60)
-    print(f"Configuration:")
-    print(f"  K = {K} components")
-    print(f"  Iterations = {n_iter}")
-    print(f"  Learning rate = {learning_rate}")
-    print(f"  Converting Alpha = {convert_alpha}")
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(f'{output_dir}/optimization.log'),
+            logging.StreamHandler()  # Also print to console
+        ]
+    )
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"Saving results to: {output_dir}/")
+
+    logger.info("=" * 60)
+    logger.info("Joint NMF Stellar Spectra Model")
+    logger.info("=" * 60)
+    logger.info(f"Configuration:")
+    logger.info(f"  K = {K} components")
+    logger.info(f"  Iterations = {n_iter}")
+    logger.info(f"  Learning rate = {learning_rate}")
+    logger.info(f"  Converting Alpha = {convert_alpha}")
+    logger.info(f"  Adding Wide Binaries = {add_WBs}")
+    logger.info(f"  Adding Mineweeper = {add_MS}")
+    logger.info(f"  Adding Hot Stars = {add_HS}")
+    logger.info(f"  Training set subsampled = {train_w_subsample}")
+    logger.info(f"  Removing naned labels = {remove_nans}")
 
     # Load data
-    print("\n[1/4] Loading data...")
+    logger.info("\n[1/4] Loading data...")
     data_file = 'boss_apogee_lux_training_data.npz'
     absorption, flux, ivar, true_labels = load_data(data_file,
                                                     convert_alpha=convert_alpha)
+
+    if add_MS:
+        absorption_ms, flux_ms, ivar_ms, true_labels_ms = load_data(
+            data_file_ms,
+            convert_alpha=convert_alpha)
+        # apply offsets found in Vedant's paper
+        true_labels_ms[:, 2] -= -0.05
+        true_labels_ms[:, 3] -= 0.04
+        # append the MS stars
+        absorption = np.append(absorption, absorption_ms, axis=0)
+        flux = np.append(flux, flux_ms, axis=0)
+        ivar = np.append(ivar, ivar_ms, axis=0)
+        true_labels = np.append(true_labels, true_labels_ms, axis=0)
+
     if add_WBs:
         absorption_wb, flux_wb, ivar_wb, true_labels_wb = load_data(
             data_file_wb,
@@ -1411,14 +1466,27 @@ if __name__ == '__main__':
         ivar = ivar[keep_stars]
         true_labels = true_labels[keep_stars]
     
+    if add_HS:
+        # load HSs, append later
+        absorption_hs, flux_hs, ivar_hs, true_labels_hs = load_data(
+            data_file_hs,
+            convert_alpha=convert_alpha)
+    
     n_stars, n_wavelengths = flux.shape
-    print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
+    logger.info(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
     # Joint optimization
-    print("\n[2/4] Running joint optimization...")
+    logger.info("\n[2/4] Running joint optimization...")
     # get training subsample
     if train_w_subsample:
-        if add_WBs and remove_nans:
+        if add_MS:
+            nbins = 25
+            nstars_per_bin = 4
+            ranges = [[3000, 6500],
+                      [1, 5.25],
+                      [-3.5, 0.5],
+                      [-0.1, 0.5]]
+        elif add_WBs and remove_nans:
             nbins = 16
             nstars_per_bin = 7
             ranges = [[3000, 6500],
@@ -1439,7 +1507,7 @@ if __name__ == '__main__':
     else:
         idx_train = np.arange(len(true_labels))
     if add_WBs and not remove_nans:
-        print("\nRunning EM-style joint optimization...")
+        logger.info("\nRunning EM-style joint optimization...")
         absorption = np.append(absorption, absorption_wb, axis=0)
         flux = np.append(flux, flux_wb, axis=0)
         ivar = np.append(ivar, ivar_wb, axis=0)
@@ -1455,6 +1523,24 @@ if __name__ == '__main__':
             size=int(len(id_bins) * 0.8), replace=False)
         
         idx_train = np.append(idx_train, idx_train_bin)
+
+        if add_HS:
+            # add in the hot stars at end
+            absorption = np.append(absorption, absorption_hs, axis=0)
+            flux = np.append(flux, flux_hs, axis=0)
+            ivar = np.append(ivar, ivar_hs, axis=0)
+            true_labels = np.append(true_labels, true_labels_hs, axis=0)
+            labels_mask = np.isfinite(true_labels)
+            init_stars = np.all(labels_mask, axis=1)
+
+            # add some hotstars to training set
+            rng = np.random.default_rng(seed=42)
+            id_bins = np.arange(n_stars, len(flux), 1)
+            idx_train_bin = rng.choice(
+                id_bins,
+                size=int(len(id_bins) * 0.8), replace=False)
+            
+            idx_train = np.append(idx_train, idx_train_bin)
 
         per_label_weights = np.zeros_like(true_labels) + 1.
         per_label_weights[~labels_mask] = 0.01  # little wait to missing, mostly learned
@@ -1496,28 +1582,53 @@ if __name__ == '__main__':
             em_adam_iters=500,
         )
     else:
-        print("\nRunning nominal joint optimization...")
+        logger.info("\nRunning nominal joint optimization...")
+
+        if add_HS:
+            # add in the hot stars at end
+            absorption = np.append(absorption, absorption_hs, axis=0)
+            flux = np.append(flux, flux_hs, axis=0)
+            ivar = np.append(ivar, ivar_hs, axis=0)
+            true_labels = np.append(true_labels, true_labels_hs, axis=0)
+            labels_mask = np.isfinite(true_labels)
+            init_stars = np.all(labels_mask, axis=1)
+
+            # add some WBs to training set
+            rng = np.random.default_rng(seed=42)
+            id_bins = np.arange(n_stars, len(flux), 1)
+            idx_train_bin = rng.choice(
+                id_bins,
+                size=int(len(id_bins) * 0.8), replace=False)
+            
+            idx_train = np.append(idx_train, idx_train_bin)
+
+            per_label_weights = np.zeros_like(true_labels) + 1.
+            per_label_weights[~labels_mask] = 0.0
+        else:
+            per_label_weights = np.zeros_like(true_labels) + 1.
+    
         inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
             flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
             n_iter=n_iter,
             learning_rate=learning_rate,
             print_every=print_every,
-            seed=42
+            seed=42,
+            per_label_weights=per_label_weights[idx_train]
         )
 
     # Compute statistics
-    print("\n[3/4] Computing statistics...")
+    logger.info("\n[3/4] Computing statistics...")
     stats = compute_label_statistics(true_labels[idx_train], inferred_labels, label_names)
 
-    print("\n" + "=" * 60)
-    print("Summary Statistics (Training Set)")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("Summary Statistics (Training Set)")
+    logger.info("=" * 60)
     for name in label_names:
         s = stats[name]
-        print(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
+        logger.info(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
 
     # Generate plots
-    print("\n[4/4] Generating plots...")
+    logger.info("\n[4/4] Generating plots...")
 
     # Wavelength grid
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
@@ -1539,7 +1650,7 @@ if __name__ == '__main__':
     )
 
     # Save results
-    print("\nSaving results...")
+    logger.info("\nSaving results...")
     np.savez(f'{output_dir}/joint_model_results.npz',
              inferred_labels=inferred_labels,
              true_labels=true_labels,
@@ -1554,14 +1665,14 @@ if __name__ == '__main__':
              stats=stats,
              convert_alpha=convert_alpha)
 
-    print(f"  Saved to {output_dir}/")
+    logger.info(f"  Saved to {output_dir}/")
 
     # =========================================================================
     # TEST STEP: Infer labels from spectra alone (no known labels)
     # =========================================================================
-    print("\n" + "=" * 60)
-    print("Test Step: Inferring labels from spectra (no known labels)")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("Test Step: Inferring labels from spectra (no known labels)")
+    logger.info("=" * 60)
 
     # Use all data as "test" - pretend we don't know the labels
     # In practice you'd use a held-out test set
@@ -1569,10 +1680,10 @@ if __name__ == '__main__':
     test_ivar = ivar
     test_true_labels = true_labels
 
-    print(f"Test set: {len(test_flux)} spectra")
-    print("Inferring labels using trained model (theta, H fixed)...")
+    logger.info(f"Test set: {len(test_flux)} spectra")
+    logger.info("Inferring labels using trained model (theta, H fixed)...")
 
-    print('"Training Ridge Regression to use as initial guesser...')
+    logger.info('"Training Ridge Regression to use as initial guesser...')
 
     # train model
     # if WBs, replace nan log(g) with infered
@@ -1589,13 +1700,13 @@ if __name__ == '__main__':
     init_labels = predict_with_ridge_npz(W_train, load_ridge_model_npz(model_path=model_path))
     init_labels_std = (init_labels - label_mean) / label_std
 
-    print("\n" + "=" * 60)
-    print("Summary Statistics (Ridge Regression)")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("Summary Statistics (Ridge Regression)")
+    logger.info("=" * 60)
     stats = compute_label_statistics(test_true_labels, init_labels, label_names)
     for name in label_names:
         s = stats[name]
-        print(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
+        logger.info(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
 
 
     # create percentile based gridding
@@ -1618,15 +1729,15 @@ if __name__ == '__main__':
     # Compute test statistics
     test_stats = compute_label_statistics(test_true_labels, test_inferred_labels, label_names)
 
-    print("\n" + "=" * 60)
-    print("Test Set Statistics")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("Test Set Statistics")
+    logger.info("=" * 60)
     for name in label_names:
         s = test_stats[name]
-        print(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
+        logger.info(f"  {name:8s}: bias={s['bias']:+.4f}, scatter={s['scatter']:.4f}, MAD={s['mad']:.4f}")
 
     # Plot test results: true vs inferred
-    print("\nGenerating test comparison plot...")
+    logger.info("\nGenerating test comparison plot...")
     plot_test_comparison(
         test_true_labels, test_inferred_labels, label_names,
         f'{output_dir}/test_true_vs_inferred.png'
@@ -1658,6 +1769,6 @@ if __name__ == '__main__':
              test_true_labels=test_true_labels,
              test_inferred_labels=test_inferred_labels,
              test_stats=test_stats)
-    print(f"Saved test results to {output_dir}/test_inference_results.npz")
+    logger.info(f"Saved test results to {output_dir}/test_inference_results.npz")
 
-    print("\nDone!")
+    logger.info("\nDone!")
