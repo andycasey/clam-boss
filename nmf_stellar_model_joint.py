@@ -912,10 +912,38 @@ def infer_labels(flux, ivar, theta, H, label_mean, label_std, scatter, init_labe
 
         labels_std_final = np.array(params['labels_std'])
 
+    # get inverse of hessian
+    hessian_fn = jit(vmap(
+        jax.hessian(single_star_loss, argnums=0),
+        in_axes=(0, 0, 0)
+    ))
+    inv_fn = jit(vmap(lambda h: jnp.linalg.inv(h + 1e-6 * jnp.eye(n_labels))))
+
+    # Compute in batches to avoid memory issues
+    cov_batch_size = 500
+    n_batches_cov = (n_stars + cov_batch_size - 1) // cov_batch_size
+    cov_matrices_std = np.zeros((n_stars, n_labels, n_labels))
+
+    for i in tqdm(range(n_batches_cov), desc="Computing Hessians"):
+        s = i * cov_batch_size
+        e = min((i + 1) * cov_batch_size, n_stars)
+        H_batch = hessian_fn(
+            jnp.array(labels_std_final[s:e]),
+            flux_jnp[s:e],
+            var_jnp[s:e]
+        )
+        cov_matrices_std[s:e] = np.array(inv_fn(H_batch))
+
+    # Convert covariance from standardized to physical units
+    # If labels_phys = labels_std * label_std + label_mean,
+    # then Cov_phys = diag(label_std) @ Cov_std @ diag(label_std)
+    scale = label_std[:, None] * label_std[None, :]  # (n_labels, n_labels)
+    cov_matrices_phys = cov_matrices_std * scale[None, :, :]  # broadcast over stars
+
     # Convert back to physical labels
     labels_final = labels_std_final * label_std + label_mean
 
-    return labels_final
+    return labels_final, cov_matrices_phys
 
 
 def plot_test_comparison(true_labels, inferred_labels,
@@ -1741,7 +1769,7 @@ if __name__ == '__main__':
     # grid_range = [np.nanpercentile(true_norm[:, i], [0.1, 99.9]) for i in range(true_norm.shape[1])]
 
     # Infer labels using only flux and ivar
-    test_inferred_labels = infer_labels(
+    test_inferred_labels, test_label_covariances = infer_labels(
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
@@ -1795,6 +1823,7 @@ if __name__ == '__main__':
     np.savez(f'{output_dir}/test_inference_results.npz',
              test_true_labels=test_true_labels,
              test_inferred_labels=test_inferred_labels,
+             test_label_covariances=test_label_covariances,
              test_stats=test_stats)
     logger.info(f"Saved test results to {output_dir}/test_inference_results.npz")
 

@@ -195,3 +195,88 @@ INFO - Saved test comparison plot to nmf_joint_results_with_scatter_K32_alpha_m_
 INFO - Saved test results to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/test_inference_results.npz
 INFO - 
 Done!
+INFO - Saving results to: nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/
+INFO - ============================================================
+INFO - Joint NMF Stellar Spectra Model
+INFO - ============================================================
+INFO - Configuration:
+INFO -   K = 160 components
+INFO -   Iterations = 10000
+INFO -   Learning rate = 0.001
+INFO -   Converting Alpha = False
+INFO -   Adding Wide Binaries = True
+INFO -   Adding Mineweeper = True
+INFO -   Adding Hot Stars = True
+INFO -   Training set subsampled = True
+INFO -   Removing naned labels = True
+INFO - 
+[1/4] Loading data...
+INFO -   Loaded 35716 stars with 4648 wavelength pixels
+INFO - 
+[2/4] Running joint optimization...
+INFO - 
+Running nominal joint optimization...
+INFO - Joint optimization setup:
+INFO -   Stars: 24483, Wavelengths: 4648
+INFO -   K = 160 components
+INFO -   Design matrix features: 15
+INFO -   Total parameters: 844,012
+INFO - Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+INFO -   Initial loss: 2.124034e+00
+INFO - 
+Optimizing for 10000 iterations...
+INFO -   Final loss: -1.830564e+00
+INFO - 
+[3/4] Computing statistics...
+INFO - 
+============================================================
+INFO - Summary Statistics (Training Set)
+INFO - ============================================================
+INFO -   teff    : bias=-2.2962, scatter=131.4848, MAD=59.8712
+INFO -   logg    : bias=-0.0015, scatter=0.1142, MAD=0.0391
+INFO -   m_h     : bias=-0.0046, scatter=0.1090, MAD=0.0535
+INFO -   alpha_m : bias=+0.0002, scatter=0.0150, MAD=0.0027
+INFO - 
+[4/4] Generating plots...
+INFO - Saved comparison plot to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/label_comparison.png
+INFO - Saved residual histogram to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/label_residuals.png
+INFO - Saved NMF components plot to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/nmf_components.png
+INFO - Saved loss plot to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/optimization_loss.png
+INFO - Saved model scatter plot to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/model_scatter.png
+INFO - 
+Saving results...
+INFO -   Saved to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/
+INFO - 
+============================================================
+INFO - Test Step: Inferring labels from spectra (no known labels)
+INFO - ============================================================
+INFO - Test set: 36057 spectra
+INFO - Inferring labels using trained model (theta, H fixed)...
+INFO - "Training Ridge Regression to use as initial guesser...
+INFO - Training Ridge regression...
+INFO - Saving Ridge model to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/nmf_ridge_model.npz...
+INFO - 
+Model saved to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/nmf_ridge_model.npz
+INFO - 
+============================================================
+INFO - Summary Statistics (Ridge Regression)
+INFO - ============================================================
+INFO -   teff    : bias=-11.1649, scatter=908.4876, MAD=206.2817
+INFO -   logg    : bias=-0.0096, scatter=0.3612, MAD=0.1946
+INFO -   m_h     : bias=-0.0181, scatter=0.2120, MAD=0.1051
+INFO -   alpha_m : bias=+0.0021, scatter=0.0877, MAD=0.0495
+INFO - Inferring labels for 36057 stars using TWO-STAGE...
+INFO -   Running L-BFGS-B optimization (GPU-accelerated)...
+INFO - 
+============================================================
+INFO - Test Set Statistics
+INFO - ============================================================
+INFO -   teff    : bias=-4.3827, scatter=805.4378, MAD=85.0383
+INFO -   logg    : bias=-0.0118, scatter=0.3974, MAD=0.1742
+INFO -   m_h     : bias=-0.0162, scatter=0.2121, MAD=0.0894
+INFO -   alpha_m : bias=+0.0086, scatter=0.1274, MAD=0.0531
+INFO - 
+Generating test comparison plot...
+INFO - Saved test results to nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/test_inference_results.npz
+INFO - 
+Done!
