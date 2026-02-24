@@ -1461,9 +1461,8 @@ if __name__ == '__main__':
         absorption_ms, flux_ms, ivar_ms, true_labels_ms = load_data(
             data_file_ms,
             convert_alpha=convert_alpha)
-        # apply offsets found in Vedant's paper
-        true_labels_ms[:, 2] -= -0.05
-        true_labels_ms[:, 3] -= 0.04
+        true_labels_ms[:, 2] -= -0.05  # apply offsets found in Vedant's paper
+        true_labels_ms[:, 3] -= 0.097  # subtract off median diff Peter found
         # append the MS stars
         absorption = np.append(absorption, absorption_ms, axis=0)
         flux = np.append(flux, flux_ms, axis=0)

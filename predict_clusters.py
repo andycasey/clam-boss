@@ -52,8 +52,9 @@ def load_data(file_path, open_clusters):
             data['vb_prob']
         ])
     cluster = data['cluster']
+    sdss_id = data['sdss_id']
 
-    return absorption, norm_flux, norm_ivar, labels, cluster
+    return absorption, norm_flux, norm_ivar, labels, cluster, sdss_id
 
 
 def plot_cluster_results(test_inferred_labels,
@@ -218,7 +219,7 @@ if __name__ == '__main__':
 
     # Load data
     print("\nLoading data...")
-    absorption, flux, ivar, true_labels, cluster = load_data(data_file, open_clusters)
+    absorption, flux, ivar, true_labels, cluster, sdss_id = load_data(data_file, open_clusters)
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
@@ -249,6 +250,16 @@ if __name__ == '__main__':
         grid_points=None,
         grid_range=None
     )
+    
+    # save the results
+    np.savez(
+        f'{output_dir}/cluster_clam_params.npz',
+        cluster=cluster,
+        sdss_id=sdss_id,
+        teff=test_inferred_labels[:, 0],
+        logg=test_inferred_labels[:, 1],
+        m_h=test_inferred_labels[:, 2],
+        alpha_m=test_inferred_labels[:, 3])
 
     # Wavelength grid
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
@@ -329,7 +340,7 @@ if __name__ == '__main__':
 
     # Load data
     print("\nLoading data...")
-    absorption, flux, ivar, true_labels, cluster = load_data(data_file, open_clusters)
+    absorption, flux, ivar, true_labels, cluster, sdss_id = load_data(data_file, open_clusters)
     n_stars, n_wavelengths = flux.shape
     print(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
 
@@ -360,6 +371,16 @@ if __name__ == '__main__':
         grid_points=None,
         grid_range=None
     )
+
+    # save the results
+    np.savez(
+        f'{output_dir}/cluster_clam_params.npz',
+        cluster=cluster,
+        sdss_id=sdss_id,
+        teff=test_inferred_labels[:, 0],
+        logg=test_inferred_labels[:, 1],
+        m_h=test_inferred_labels[:, 2],
+        alpha_m=test_inferred_labels[:, 3])
 
     # Wavelength grid
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
