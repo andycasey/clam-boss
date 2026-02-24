@@ -240,7 +240,7 @@ if __name__ == '__main__':
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Infer labels using BFGS with grid search initialization
-    test_inferred_labels = infer_labels(
+    test_inferred_labels, test_label_covariances = infer_labels(
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
@@ -259,7 +259,8 @@ if __name__ == '__main__':
         teff=test_inferred_labels[:, 0],
         logg=test_inferred_labels[:, 1],
         m_h=test_inferred_labels[:, 2],
-        alpha_m=test_inferred_labels[:, 3])
+        alpha_m=test_inferred_labels[:, 3],
+        test_label_covariances=test_label_covariances)
 
     # Wavelength grid
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
@@ -361,7 +362,7 @@ if __name__ == '__main__':
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Infer labels using BFGS with grid search initialization
-    test_inferred_labels = infer_labels(
+    test_inferred_labels, test_label_covariances = infer_labels(
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
@@ -380,7 +381,8 @@ if __name__ == '__main__':
         teff=test_inferred_labels[:, 0],
         logg=test_inferred_labels[:, 1],
         m_h=test_inferred_labels[:, 2],
-        alpha_m=test_inferred_labels[:, 3])
+        alpha_m=test_inferred_labels[:, 3],
+        test_label_covariances=test_label_covariances)
 
     # Wavelength grid
     loglam = 3.5523 + 0.0001 * np.arange(n_wavelengths)
