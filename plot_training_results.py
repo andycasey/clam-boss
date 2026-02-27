@@ -10,7 +10,7 @@ from nmf_stellar_model_joint import (load_data, plot_test_comparison,
 if __name__ == '__main__':
     # Configuration
     config = configparser.ConfigParser()
-    base_dir = 'nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS'
+    base_dir = 'model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS'
     default_cfg = f'{base_dir}/default.cfg'
     config.read(default_cfg)
 
@@ -47,10 +47,10 @@ if __name__ == '__main__':
 
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        output_dir = f'nmf_joint_results_with_scatter_K32{append_wb}{append_ms}{append_hs}'
+        output_dir = f'model_results/nmf_joint_results_with_scatter_K32{append_wb}{append_ms}{append_hs}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        output_dir = f'nmf_joint_results_with_scatter_K32_alpha_m{append_wb}{append_ms}{append_hs}'
+        output_dir = f'model_results/nmf_joint_results_with_scatter_K32_alpha_m{append_wb}{append_ms}{append_hs}'
 
     # Load data
     data_file = 'boss_apogee_lux_training_data.npz'

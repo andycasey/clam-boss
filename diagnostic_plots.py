@@ -323,7 +323,7 @@ if __name__ == '__main__':
     import os
     
     # Load model
-    model_dir = 'nmf_joint_results_with_scatter_K32'
+    model_dir = 'model_results/nmf_joint_results_with_scatter_K32'
     if not os.path.exists(f'{model_dir}/joint_model_results.npz'):
         print(f"Model not found in {model_dir}/")
         print("Run nmf_stellar_model_joint.py first to train the model.")
