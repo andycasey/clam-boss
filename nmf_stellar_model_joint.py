@@ -165,8 +165,8 @@ if __name__ == '__main__':
             nbins = 25
             nstars_per_bin = 15
             ranges = [[3000, 6500],
-                    [1, 5.25],
-                    [-0.05, 0.5]]
+                      [1, 5.25],
+                      [-0.05, 0.5]]
             bins_use = [0, 1, 3]
         elif add_WBs and remove_nans:
             nbins = 16
@@ -373,6 +373,67 @@ if __name__ == '__main__':
                   label_names,
                   output_dir,
                   convert_alpha)
+
+    # now do each plot individually for each type
+    data_types = ['nominal', 'minesweeper', 'wide_binary', 'hot_stars']
+    for dt in data_types:
+        ev = (meta_data[:, -1] == dt)
+        if np.sum(ev) > 0:
+            ranges = []
+            for i in range(true_labels.shape[1]):
+                minn, maxx = np.nanpercentile(true_labels[ev, i], [0, 100])
+                if not np.isnan(minn):
+                    minn *= 0.95
+                else:
+                    minn = -1.
+                if not np.isnan(maxx):
+                    maxx *= 1.05
+                else:
+                    maxx = 1.
+                ranges.append((minn, maxx))
+            plot_test_comparison(
+                true_labels[ev], test_inferred_labels[ev], label_names,
+                f'{output_dir}/test_true_vs_inferred_{dt}.png',
+                label_bounds={
+                                'teff': ranges[0],
+                                'logg': ranges[1],
+                                'm_h': ranges[2],
+                                'alpha_m': ranges[3]
+                            }
+            )
+
+            fe_h_perc = np.nanpercentile(true_labels[ev, 2], 1)
+            if np.isnan(fe_h_perc):
+                fe_h_perc = -1
+
+            # kiel diagram
+            kiel_diagram(true_labels[ev],
+                         test_inferred_labels[ev],
+                         label_names,
+                         output_dir,
+                         fe_h=False,
+                         name_append=f'_{dt}',
+                         teff_max=ranges[0][1])
+
+            # keil diagram with Fe/H
+            kiel_diagram(true_labels[ev],
+                         test_inferred_labels[ev],
+                         label_names,
+                         output_dir,
+                         fe_h=True,
+                         name_append=f'_{dt}',
+                         teff_max=ranges[0][1],
+                         feh_min=fe_h_perc)
+
+            # alpha/M vs Fe/H
+            if dt != 'hot_stars':
+                alpha_fe_plot(true_labels[ev],
+                              test_inferred_labels[ev],
+                              label_names,
+                              output_dir,
+                              convert_alpha,
+                              name_append=f'_{dt}',
+                              feh_min=fe_h_perc)
 
     # Save test results
     np.savez(f'{output_dir}/test_inference_results.npz',
