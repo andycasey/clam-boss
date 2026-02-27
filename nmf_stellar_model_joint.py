@@ -124,33 +124,32 @@ if __name__ == '__main__':
 
     # Load data
     logger.info("\n[1/4] Loading data...")
-    data_file = 'boss_apogee_lux_training_data.npz'
-    absorption, flux, ivar, true_labels = load_data(data_file,
-                                                    convert_alpha=convert_alpha)
+    data_file = 'boss_clam_training_data.npz'
+    absorption, flux, ivar, true_labels, meta_data = load_data(
+        data_file,
+        convert_alpha=convert_alpha)
+    keep = (meta_data[:, -1] == 'nominal')
 
     if add_MS:
-        absorption_ms, flux_ms, ivar_ms, true_labels_ms = load_data(
-            data_file_ms,
-            convert_alpha=convert_alpha)
-        true_labels_ms[:, 2] -= -0.05  # apply offsets found in Vedant's paper
-        true_labels_ms[:, 3] -= 0.097  # subtract off median diff Peter found
-        # append the MS stars
-        absorption = np.append(absorption, absorption_ms, axis=0)
-        flux = np.append(flux, flux_ms, axis=0)
-        ivar = np.append(ivar, ivar_ms, axis=0)
-        true_labels = np.append(true_labels, true_labels_ms, axis=0)
-
+        keep += (meta_data[:, -1] == 'minesweeper')
+        true_labels[meta_data[:, -1] == 'minesweeper', 2] -= -0.05  # apply offsets found in Vedant's paper
+        true_labels[meta_data[:, -1] == 'minesweeper', 3] -= 0.097  # subtract off median diff Peter found
     if add_WBs:
-        absorption_wb, flux_wb, ivar_wb, true_labels_wb = load_data(
-            data_file_wb,
-            convert_alpha=convert_alpha)
+        keep += (meta_data[:, -1] == 'wide_binary')
+    if add_HS:
+        # load HSs, append later
+        hs = meta_data[:, -1] == 'hot_stars'
+        absorption_hs = absorption[hs]
+        flux_hs = flux[hs]
+        ivar_hs = ivar[hs]
+        true_labels_hs = true_labels[hs]
+        meta_data_hs = meta_data[hs]
+    absorption = absorption[keep]
+    flux = flux[keep]
+    ivar = ivar[keep]
+    true_labels = true_labels[keep]
+    meta_data = meta_data[keep]
     if remove_nans:  # combine data now if not doing EM
-        # append the WBs
-        absorption = np.append(absorption, absorption_wb, axis=0)
-        flux = np.append(flux, flux_wb, axis=0)
-        ivar = np.append(ivar, ivar_wb, axis=0)
-        true_labels = np.append(true_labels, true_labels_wb, axis=0)
-
         # remove nans
         labels_mask = np.isfinite(true_labels)
         keep_stars = np.all(labels_mask, axis=1)
@@ -158,12 +157,6 @@ if __name__ == '__main__':
         flux = flux[keep_stars]
         ivar = ivar[keep_stars]
         true_labels = true_labels[keep_stars]
-    
-    if add_HS:
-        # load HSs, append later
-        absorption_hs, flux_hs, ivar_hs, true_labels_hs = load_data(
-            data_file_hs,
-            convert_alpha=convert_alpha)
     
     n_stars, n_wavelengths = flux.shape
     logger.info(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
@@ -199,14 +192,14 @@ if __name__ == '__main__':
             random_seed=42, ranges=ranges)
     else:
         idx_train = np.arange(len(true_labels))
-    if add_WBs and not remove_nans:
-        logger.info("\nRunning EM-style joint optimization...")
-        absorption = np.append(absorption, absorption_wb, axis=0)
-        flux = np.append(flux, flux_wb, axis=0)
-        ivar = np.append(ivar, ivar_wb, axis=0)
-        true_labels = np.append(true_labels, true_labels_wb, axis=0)
-        labels_mask = np.isfinite(true_labels)
-        init_stars = np.all(labels_mask, axis=1)
+
+    if add_HS:
+        # add in the hot stars at end
+        absorption = np.append(absorption, absorption_hs, axis=0)
+        flux = np.append(flux, flux_hs, axis=0)
+        ivar = np.append(ivar, ivar_hs, axis=0)
+        true_labels = np.append(true_labels, true_labels_hs, axis=0)
+        meta_data = np.append(meta_data, meta_data_hs, axis=0)
 
         # add some WBs to training set
         rng = np.random.default_rng(seed=42)
@@ -217,100 +210,20 @@ if __name__ == '__main__':
         
         idx_train = np.append(idx_train, idx_train_bin)
 
-        if add_HS:
-            # add in the hot stars at end
-            absorption = np.append(absorption, absorption_hs, axis=0)
-            flux = np.append(flux, flux_hs, axis=0)
-            ivar = np.append(ivar, ivar_hs, axis=0)
-            true_labels = np.append(true_labels, true_labels_hs, axis=0)
-            labels_mask = np.isfinite(true_labels)
-            init_stars = np.all(labels_mask, axis=1)
+    labels_mask = np.isfinite(true_labels)
+    init_stars = np.all(labels_mask, axis=1)
+    per_label_weights = np.zeros_like(true_labels) + 1.
+    per_label_weights[~labels_mask] = 0.0
 
-            # add some hotstars to training set
-            rng = np.random.default_rng(seed=42)
-            id_bins = np.arange(n_stars, len(flux), 1)
-            idx_train_bin = rng.choice(
-                id_bins,
-                size=int(len(id_bins) * 0.8), replace=False)
-            
-            idx_train = np.append(idx_train, idx_train_bin)
-
-        per_label_weights = np.zeros_like(true_labels) + 1.
-        per_label_weights[~labels_mask] = 0.01  # little wait to missing, mostly learned
-
-        # start with non-nan
-        label_mean0 = np.nanmean(true_labels[idx_train], axis=0)
-        label_std0 = np.nanstd(true_labels[idx_train], axis=0)
-        init_true_labels = true_labels.copy()
-        init_true_labels[~labels_mask] = 4.5  # for now this assumes logg missing
-        inferred_labels0, theta0, H0, W0, label_mean0, label_std0, losses0, scatter0 = joint_optimization(
-            flux[idx_train],
-            ivar[idx_train],
-            init_true_labels[idx_train],
-            K,
-            per_label_weights=per_label_weights[idx_train],
-            n_iter=5_000,
-            learning_rate=learning_rate,
-            print_every=print_every,
-            seed=42,
-            label_mean=label_mean0,
-            label_std=label_std0,
-            logger=logger
-        )
-
-        # now do EM
-        inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization_with_em(
-            flux[idx_train], ivar[idx_train],
-            true_labels[idx_train],
-            labels_mask[idx_train],
-            theta0, H0, K,
-            label_mean0, label_std0,
-            scatter0,
-            infer_kwargs={'learning_rate': 0.01},
-            joint_kwargs={'n_iter': 3_000,
-                        'learning_rate': learning_rate,
-                        'print_every': print_every,
-                        'seed': 42,
-                        'per_label_weights': per_label_weights[idx_train],
-                        'logger': logger},
-            em_iters=4,
-            em_adam_iters=500,
-        )
-    else:
-        logger.info("\nRunning nominal joint optimization...")
-
-        if add_HS:
-            # add in the hot stars at end
-            absorption = np.append(absorption, absorption_hs, axis=0)
-            flux = np.append(flux, flux_hs, axis=0)
-            ivar = np.append(ivar, ivar_hs, axis=0)
-            true_labels = np.append(true_labels, true_labels_hs, axis=0)
-            labels_mask = np.isfinite(true_labels)
-            init_stars = np.all(labels_mask, axis=1)
-
-            # add some WBs to training set
-            rng = np.random.default_rng(seed=42)
-            id_bins = np.arange(n_stars, len(flux), 1)
-            idx_train_bin = rng.choice(
-                id_bins,
-                size=int(len(id_bins) * 0.8), replace=False)
-            
-            idx_train = np.append(idx_train, idx_train_bin)
-
-            per_label_weights = np.zeros_like(true_labels) + 1.
-            per_label_weights[~labels_mask] = 0.0
-        else:
-            per_label_weights = np.zeros_like(true_labels) + 1.
-    
-        inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
-            flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
-            n_iter=n_iter,
-            learning_rate=learning_rate,
-            print_every=print_every,
-            seed=42,
-            per_label_weights=per_label_weights[idx_train],
-            logger=logger
-        )
+    inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
+        flux[idx_train], ivar[idx_train], true_labels[idx_train], K,
+        n_iter=n_iter,
+        learning_rate=learning_rate,
+        print_every=print_every,
+        seed=42,
+        per_label_weights=per_label_weights[idx_train],
+        logger=logger
+    )
 
     # Compute statistics
     logger.info("\n[3/4] Computing statistics...")
@@ -350,6 +263,7 @@ if __name__ == '__main__':
     np.savez(f'{output_dir}/joint_model_results.npz',
              inferred_labels=inferred_labels,
              true_labels=true_labels,
+             meta_data=meta_data,
              idx_train=idx_train,
              theta=theta,
              H=H,
@@ -467,6 +381,7 @@ if __name__ == '__main__':
              test_true_labels=test_true_labels,
              test_inferred_labels=test_inferred_labels,
              test_label_covariances=test_label_covariances,
+             meta_data=meta_data,
              test_stats=test_stats)
     logger.info(f"Saved test results to {output_dir}/test_inference_results.npz")
 

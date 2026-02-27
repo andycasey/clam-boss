@@ -48,8 +48,15 @@ def load_data(file_path, convert_alpha=True):
             data['fe_h'],
             data['raw_alpha_m_atm']
         ])
+    
+    meta_data = np.column_stack([
+            data['sdss_id'],
+            data['telescope'],
+            data['snr'],
+            data['data_type']
+    ])
 
-    return absorption, norm_flux, norm_ivar, labels
+    return absorption, norm_flux, norm_ivar, labels, meta_data
 
 
 def compute_label_statistics(true_labels, inferred_labels, label_names):
