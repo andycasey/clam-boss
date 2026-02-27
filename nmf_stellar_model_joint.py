@@ -26,7 +26,6 @@ from clam_boss.utils import (
 
 from clam_boss.model import (
     joint_optimization,
-    joint_optimization_with_em,
     compute_nmf_weights,
     train_and_save_ridge_model,
     load_ridge_model_npz,
@@ -67,19 +66,16 @@ if __name__ == '__main__':
     # run code
     if add_WBs:
         append_wb = '_w_wide_binaries'
-        data_file_wb = 'boss_apogee_wide_binary_training_data.npz'
     else:
         append_wb = ''
 
     if add_MS:
         append_ms = '_w_MS'
-        data_file_ms = 'boss_minesweeper_training_data.npz'
     else:
         append_ms = ''
 
     if add_HS:
         append_hs = '_w_HS'
-        data_file_hs = 'boss_hot_star_training_data.npz'
     else:
         append_hs = ''
 
@@ -167,11 +163,11 @@ if __name__ == '__main__':
     if train_w_subsample:
         if add_MS:
             nbins = 25
-            nstars_per_bin = 4
+            nstars_per_bin = 15
             ranges = [[3000, 6500],
-                      [1, 5.25],
-                      [-3.5, 0.5],
-                      [-0.1, 0.5]]
+                    [1, 5.25],
+                    [-0.05, 0.5]]
+            bins_use = [0, 1, 3]
         elif add_WBs and remove_nans:
             nbins = 16
             nstars_per_bin = 7
@@ -179,6 +175,7 @@ if __name__ == '__main__':
                       [1, 5.25],
                       [-2, 0.5],
                       [-0.1, 0.3]]
+            bins_use = [0, 1, 2, 3]
         else:
             nbins = 15
             nstars_per_bin = 7
@@ -186,8 +183,9 @@ if __name__ == '__main__':
                       [1, 5],
                       [-2, 0.5],
                       [-0.1, 0.3]]
+            bins_use = [0, 1, 2, 3]
         idx_train = unf_training_sample(
-            true_labels,
+            true_labels[:, bins_use],
             nbins, nstars_per_bin,
             random_seed=42, ranges=ranges)
     else:
