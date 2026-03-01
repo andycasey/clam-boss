@@ -153,6 +153,7 @@ if __name__ == '__main__':
         flux = flux[keep_stars]
         ivar = ivar[keep_stars]
         true_labels = true_labels[keep_stars]
+        meta_data = meta_data[keep_stars]
     
     n_stars, n_wavelengths = flux.shape
     logger.info(f"  Loaded {n_stars} stars with {n_wavelengths} wavelength pixels")
