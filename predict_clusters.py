@@ -1,9 +1,18 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from nmf_stellar_model_joint import (infer_labels, plot_spectra_comparison,
-                                     predict_with_ridge_npz, load_ridge_model_npz,
-                                     compute_nmf_weights)
+
+from clam_boss.model import (
+    compute_nmf_weights,
+    load_ridge_model_npz,
+    predict_with_ridge_npz,
+    infer_labels,
+)
+
+from clam_boss.plot import (
+    plot_spectra_comparison,
+)
+
 import warnings
 import matplotlib.colors as colors
 import matplotlib.cm as cm
