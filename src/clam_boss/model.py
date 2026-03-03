@@ -9,7 +9,10 @@ from tqdm import tqdm, trange
 from sklearn.decomposition import NMF
 import logging
 from typing import Tuple
-from jaxlib._jax import ArrayImpl
+try:
+    from jaxlib._jax import ArrayImpl
+except ModuleNotFoundError:
+    from jaxlib.xla_extension import ArrayImpl
 
 jax.config.update("jax_enable_x64", True)
 
