@@ -553,7 +553,8 @@ def infer_labels(flux: np.ndarray,
                  grid_range:tuple = (-3.0, 3.0),
                  fixed_mask: np.ndarray = None,
                  fixed_values_phys: np.ndarray = None,
-                 logger=None):
+                 logger=None,
+                 batch_size_bfgs: int = 100):
     """
     Infer stellar labels from spectra using a trained model.
 
@@ -599,6 +600,8 @@ def infer_labels(flux: np.ndarray,
     fixed_values_phys : None, or array-like
         Optional. Physical-unit values to fix to when fixed_mask is True.
         Broadcast rules same as fixed_mask.
+    batch_size_bfgs: int
+         batch size for bfgs. Need to play with for GPU memory 
 
     Returns:
     --------
@@ -886,8 +889,7 @@ def infer_labels(flux: np.ndarray,
         solver = jaxopt.LBFGS(fun=single_star_loss, maxiter=n_iteri, tol=1e-6)
         
         # Batch size - adjust based on GPU memory (100 is safe for most GPUs)
-        batch_size = 100
-        n_batches = (n_stars + batch_size - 1) // batch_size
+        n_batches = (n_stars + batch_size_bfgs - 1) // batch_size_bfgs
         
         @jit
         def optimize_batch(init_batch, flux_batch, var_batch):
@@ -897,8 +899,8 @@ def infer_labels(flux: np.ndarray,
             return vmap(optimize_single)(init_batch, flux_batch, var_batch)
         
         for i in tqdm(range(n_batches), desc="BFGS batches"):
-            start_idx = i * batch_size
-            end_idx = min((i + 1) * batch_size, n_stars)
+            start_idx = i * batch_size_bfgs
+            end_idx = min((i + 1) * batch_size_bfgs, n_stars)
             
             batch_result = optimize_batch(
                 jnp.array(init_labels_std[start_idx:end_idx]),
