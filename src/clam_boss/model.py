@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import jax.nn as jnn
-from jax import jit, vmap
+from jax import jit, vmap, pmap
 import optax
 import warnings
 from tqdm import tqdm, trange
@@ -893,24 +893,54 @@ def infer_labels(flux: np.ndarray,
         
         # Batch size - adjust based on GPU memory (100 is safe for most GPUs)
         n_batches = (n_stars + batch_size_bfgs - 1) // batch_size_bfgs
-        
-        @jit
-        def optimize_batch(init_batch, flux_batch, var_batch):
-            def optimize_single(init_single, flux_single, var_single):
-                result = solver.run(init_single, flux_single, var_single)
-                return result.params
-            return vmap(optimize_single)(init_batch, flux_batch, var_batch)
-        
+
+        # see if multiple devises
+        n_devices = jax.device_count()
+        print(f'Optimizing on {n_devices} GPUs')
+        if n_devices > 1:
+            @pmap
+            def optimize_batch(init_batch, flux_batch, var_batch):
+                def optimize_single(init_single, flux_single, var_single):
+                    result = solver.run(init_single, flux_single, var_single)
+                    return result.params
+                return vmap(optimize_single)(init_batch, flux_batch, var_batch)
+        else:
+            @jit
+            def optimize_batch(init_batch, flux_batch, var_batch):
+                def optimize_single(init_single, flux_single, var_single):
+                    result = solver.run(init_single, flux_single, var_single)
+                    return result.params
+                return vmap(optimize_single)(init_batch, flux_batch, var_batch)
+
         for i in tqdm(range(n_batches), desc="BFGS batches"):
             start_idx = i * batch_size_bfgs
             end_idx = min((i + 1) * batch_size_bfgs, n_stars)
-            
-            batch_result = optimize_batch(
-                jnp.array(init_labels_std[start_idx:end_idx]),
-                flux_jnp[start_idx:end_idx],
-                var_jnp[start_idx:end_idx]
-            )
-            labels_std_final[start_idx:end_idx] = np.array(batch_result)
+
+            batch_init = jnp.array(init_labels_std[start_idx:end_idx])
+            batch_flux = flux_jnp[start_idx:end_idx]
+            batch_var  = var_jnp[start_idx:end_idx]
+
+            actual_size = end_idx - start_idx
+
+            if n_devices > 1:
+                # Pad to nearest multiple of n_devices if needed
+                remainder = actual_size % n_devices
+                if remainder != 0:
+                    pad = n_devices - remainder
+                    batch_init = jnp.concatenate([batch_init, jnp.zeros((pad, batch_init.shape[-1]))], axis=0)
+                    batch_flux = jnp.concatenate([batch_flux, jnp.zeros((pad, batch_flux.shape[-1]))], axis=0)
+                    batch_var  = jnp.concatenate([batch_var,  jnp.zeros((pad, batch_var.shape[-1]))],  axis=0)
+
+                per_device = batch_init.shape[0] // n_devices
+                result = optimize_batch(
+                    batch_init.reshape(n_devices, per_device, -1),
+                    batch_flux.reshape(n_devices, per_device, -1),
+                    batch_var.reshape(n_devices, per_device, -1)
+                ).reshape(-1, batch_init.shape[-1])[:actual_size]  # slice off padding
+            else:
+                result = optimize_batch(batch_init, batch_flux, batch_var)
+
+            labels_std_final[start_idx:end_idx] = np.array(result)
 
     else:  # adam
         # Batch Adam optimization (original behavior)
