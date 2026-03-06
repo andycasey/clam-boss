@@ -552,6 +552,7 @@ def infer_labels(flux: np.ndarray,
                  learning_rate: float = 0.05,
                  seed:int = 42,
                  optimizer: str = 'adam',
+                 schedule = None,
                  grid_points: int = 5,
                  grid_range:tuple = (-3.0, 3.0),
                  fixed_mask: np.ndarray = None,
@@ -592,6 +593,8 @@ def infer_labels(flux: np.ndarray,
         Random seed
     optimizer : str
         Optimization method: 'adam' or 'bfgs' or 'two-stage'
+    schedule
+        optional scheudle to pass to adam
     grid_points : int | list
         Number of grid points per dimension for initial grid search
         (only used when init_labels_std is None)
@@ -847,7 +850,10 @@ def infer_labels(flux: np.ndarray,
         def loss_and_grad(params):
             return jax.value_and_grad(loss_fn)(params)
 
-        opt = optax.adam(learning_rate)
+        if schedule is not None:
+            opt = optax.adam(schedule)
+        else:
+            opt = optax.adam(learning_rate)
         opt_state = opt.init(params)
 
         @jit
@@ -942,48 +948,8 @@ def infer_labels(flux: np.ndarray,
 
             labels_std_final[start_idx:end_idx] = np.array(result)
 
-    else:  # adam
-        # Batch Adam optimization (original behavior)
-        params = {'labels_std': jnp.array(init_labels_std)}
-
-        @jit
-        def forward(params):
-            """Compute predicted flux from labels."""
-            labels_std = params['labels_std']
-            design_matrix = build_design_matrix_batch_jax(labels_std)
-            W = jnn.softplus(design_matrix @ theta_jnp)
-            pred_flux = 1.0 - W @ H_jnp
-            return pred_flux
-
-        @jit
-        def loss_fn(params):
-            """Compute weighted reconstruction loss."""
-            pred_flux = forward(params)
-            total_var = var_jnp + scatter_sq
-            chi_sq = (flux_jnp - pred_flux)**2 / total_var
-            return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
-
-        @jit
-        def loss_and_grad(params):
-            return jax.value_and_grad(loss_fn)(params)
-
-        opt = optax.adam(learning_rate)
-        opt_state = opt.init(params)
-
-        @jit
-        def update_step(params, opt_state):
-            loss, grads = loss_and_grad(params)
-            updates, opt_state = opt.update(grads, opt_state, params)
-            params = optax.apply_updates(params, updates)
-            return params, opt_state, loss
-
-        with tqdm(total=n_iter) as pb:
-            for i in range(n_iter):
-                params, opt_state, loss = update_step(params, opt_state)
-                pb.set_description(f"loss = {float(loss):.4e}")
-                pb.update()
-
-        labels_std_final = np.array(params['labels_std'])
+    if optimizer not in ['adam', 'bfgs', 'two-stage']:
+        raise ValueError('Provide invalid optimizer string!')
 
     # =====================================
     # GET INVERSE OF HESSIAN
