@@ -3,6 +3,7 @@ import numpy as np
 import h5py
 from astropy.table import Table
 from tqdm import tqdm
+import optax
 
 from clam_boss.model import (
     compute_nmf_weights,
@@ -21,18 +22,32 @@ def infer_chunk(base_dir, flux, ivar, theta, H, label_mean, label_std, scatter):
         load_ridge_model_npz(model_path=model_path))
     init_labels_std = (init_labels - label_mean) / label_std
 
-    # Infer labels using BFGS with grid search initialization
+    # Infer labels using adam with decay schedule
     test_inferred_labels, test_label_covariances = infer_labels(
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=[100, 1000],
+        n_iter=1000,
         learning_rate=0.01,
-        optimizer='two-stage',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
+        optimizer='adam',
         grid_points=None,
         grid_range=None,
-        batch_size_bfgs=20000,
     )
+    # refine for hot stars
+    ev_hot = test_inferred_labels[:, 0] > 8000
+    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+            flux[ev_hot], ivar[ev_hot],
+            theta, H, label_mean, label_std, scatter,
+            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+            n_iter=1000,
+            learning_rate=0.01,
+            optimizer='bfgs',
+            grid_points=None,
+            grid_range=None,
+            logger=None,
+            batch_size_bfgs=np.sum(ev_hot),
+        )
     return test_inferred_labels, test_label_covariances
 
 
