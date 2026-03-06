@@ -31,7 +31,7 @@ def infer_chunk(base_dir, flux, ivar, theta, H, label_mean, label_std, scatter):
         optimizer='two-stage',
         grid_points=None,
         grid_range=None,
-        batch_size_bfgs=50000,
+        batch_size_bfgs=20000,
     )
     return test_inferred_labels, test_label_covariances
 
@@ -69,7 +69,7 @@ if __name__ == '__main__':
     label_std = res['label_std']
     scatter = res['scatter']
 
-    chunksize = 50000
+    chunksize = 100000
     n_stars = len(idx_snr)
     n_batches = (n_stars + chunksize - 1) // chunksize
 
