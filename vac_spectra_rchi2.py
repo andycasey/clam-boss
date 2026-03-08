@@ -70,12 +70,12 @@ if __name__ == '__main__':
     n_stars = len(idx_snr)
     n_batches = (n_stars + chunksize - 1) // chunksize
 
+    save_dir = '/data/stassun/medani/SDSS-V_data/DR20_data'
+
     params = np.load(f'{save_dir}/dr20_clam_inferred_parameters.npz')
     inferred_labels = params['inferred_labels']
     label_covariances = params['label_covariances']
     rchi2 = np.zeros(n_stars)
-
-    save_dir = '/data/stassun/medani/SDSS-V_data/DR20_data'
 
     for i in tqdm(range(n_batches), desc="allstar batches"):
         start_idx = i * chunksize
