@@ -6,6 +6,7 @@ from tqdm import tqdm
 import optax
 import jax.numpy as jnp
 from jax import jit
+import jax.nn as jnn
 
 from clam_boss.model import (
     compute_nmf_weights,
