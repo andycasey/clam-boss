@@ -17,6 +17,7 @@ import shutil
 import logging
 import configparser
 import numpy as np
+import optax
 
 from clam_boss.utils import (
     load_data,
@@ -163,11 +164,11 @@ if __name__ == '__main__':
     # get training subsample
     if train_w_subsample:
         if add_MS:
-            nbins = 25
-            nstars_per_bin = 15
-            ranges = [[3000, 6500],
+            nbins = 40
+            nstars_per_bin = 7
+            ranges = [[2800, 6500],
                       [1, 5.25],
-                      [-0.05, 0.5]]
+                      [-0.1, 0.5]]
             bins_use = [0, 1, 3]
         elif add_WBs and remove_nans:
             nbins = 16
@@ -329,13 +330,29 @@ if __name__ == '__main__':
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=[100, 1000],
+        n_iter=1000,
         learning_rate=0.01,
-        optimizer='two-stage',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
+        optimizer='adam',
         grid_points=None,
         grid_range=None,
         logger=logger
     )
+
+    # refine for hot stars
+    ev_hot = test_inferred_labels[:, 0] > 8000
+    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+            test_flux[ev_hot], test_ivar[ev_hot],
+            theta, H, label_mean, label_std, scatter,
+            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+            n_iter=1000,
+            learning_rate=0.01,
+            optimizer='bfgs',
+            grid_points=None,
+            grid_range=None,
+            logger=logger,
+            batch_size_bfgs=np.sum(ev_hot),
+        )
 
     # Compute test statistics
     test_stats = compute_label_statistics(test_true_labels, test_inferred_labels, label_names)
