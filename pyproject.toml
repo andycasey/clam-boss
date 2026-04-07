@@ -1,0 +1,18 @@
+[project]
+name = "clam-boss"
+version = "0.1.0"
+description = "Train and run the CLAM on SDSS-V BOSS data"
+authors = [
+    {name = "imedan",email = "ilija.medan@gmail.com"}
+]
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.11"
+dependencies = [
+]
+
+[tool.poetry]
+packages = [{include = "clam_boss", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
