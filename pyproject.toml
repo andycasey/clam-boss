@@ -1,0 +1,17 @@
+[project]
+name = "clam-boss"
+version = "0.1.0"
+description = "Forward model normalized spectra from stellar labels jusing NMF decomposition"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "jax",
+  "optax",
+  "tqdm",
+  "scikit-learn",
+  "h5py",
+  "astropy",
+  "matplotlib",
+]
+
