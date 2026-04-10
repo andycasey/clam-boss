@@ -21,3 +21,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/clam_boss"]
+
+[project.optional-dependencies]
+gpu = ["jax[cuda12-local]"]
