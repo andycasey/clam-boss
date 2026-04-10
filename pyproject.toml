@@ -13,6 +13,7 @@ dependencies = [
   "h5py",
   "astropy",
   "matplotlib",
+  "jaxopt",
 ]
 
 [build-system]
