@@ -171,13 +171,12 @@ if __name__ == '__main__':
                       [-0.1, 0.5]]
             bins_use = [0, 1, 3]
         elif add_WBs and remove_nans:
-            nbins = 16
+            nbins = 40
             nstars_per_bin = 7
-            ranges = [[3000, 6500],
+            ranges = [[2800, 6500],
                       [1, 5.25],
-                      [-2, 0.5],
-                      [-0.1, 0.3]]
-            bins_use = [0, 1, 2, 3]
+                      [-0.1, 0.5]]
+            bins_use = [0, 1, 3]
         else:
             nbins = 15
             nstars_per_bin = 7
