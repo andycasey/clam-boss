@@ -34,7 +34,9 @@ from clam_boss.model import (
 from clam_boss.init_model import (
     train_and_save_ridge_model,
     load_ridge_model_npz,
-    predict_with_ridge_npz
+    predict_with_ridge_npz,
+    train_and_save_MLP,
+    load_MLP_model
 )
 
 from clam_boss.plot import (
@@ -309,7 +311,7 @@ if __name__ == '__main__':
     logger.info(f"Test set: {len(test_flux)} spectra")
     logger.info("Inferring labels using trained model (theta, H fixed)...")
 
-    logger.info('"Training Ridge Regression to use as initial guesser...')
+    logger.info('"Training MLP to use as initial guesser...')
 
     # train model
     # if WBs, replace nan log(g) with infered
@@ -318,17 +320,18 @@ if __name__ == '__main__':
         mask = labels_mask[idx_train]
         labels_ridge[~mask] = inferred_labels[~mask]
     W_train = compute_nmf_weights(flux[idx_train], H)
-    model_path = f'{output_dir}/nmf_ridge_model.npz'
-    train_and_save_ridge_model(W_train, labels_ridge,
-                               save_path=model_path, alpha=1.,
-                               logger=logger)
+    model_path = f'{output_dir}/nmf_MLP_model.npz'
+    train_and_save_MLP(W_train, labels_ridge,
+                       save_path=model_path,
+                       logger=logger)
     # predict from this model
     W_train = compute_nmf_weights(test_flux, H)
-    init_labels = predict_with_ridge_npz(W_train, load_ridge_model_npz(model_path=model_path))
+    model = load_MLP_model(save_path=model_path)
+    init_labels = model.predict(W_train)
     init_labels_std = (init_labels - label_mean) / label_std
 
     logger.info("\n" + "=" * 60)
-    logger.info("Summary Statistics (Ridge Regression)")
+    logger.info("Summary Statistics (MLP)")
     logger.info("=" * 60)
     stats = compute_label_statistics(test_true_labels, init_labels, label_names)
     for name in label_names:
@@ -346,29 +349,29 @@ if __name__ == '__main__':
         test_flux, test_ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=1000,
+        n_iter=[500, 100],
         learning_rate=0.01,
-        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
-        optimizer='adam',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=500),
+        optimizer='two-stage',
         grid_points=None,
         grid_range=None,
         logger=logger
     )
 
     # refine for hot stars
-    ev_hot = test_inferred_labels[:, 0] > 8000
-    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
-            test_flux[ev_hot], test_ivar[ev_hot],
-            theta, H, label_mean, label_std, scatter,
-            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
-            n_iter=1000,
-            learning_rate=0.01,
-            optimizer='bfgs',
-            grid_points=None,
-            grid_range=None,
-            logger=logger,
-            batch_size_bfgs=np.sum(ev_hot),
-        )
+    # ev_hot = test_inferred_labels[:, 0] > 8000
+    # test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+    #         test_flux[ev_hot], test_ivar[ev_hot],
+    #         theta, H, label_mean, label_std, scatter,
+    #         init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+    #         n_iter=1000,
+    #         learning_rate=0.01,
+    #         optimizer='bfgs',
+    #         grid_points=None,
+    #         grid_range=None,
+    #         logger=logger,
+    #         batch_size_bfgs=np.sum(ev_hot),
+    #     )
 
     # Compute test statistics
     test_stats = compute_label_statistics(test_true_labels, test_inferred_labels, label_names)
