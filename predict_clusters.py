@@ -174,7 +174,7 @@ def plot_compare_clusers(mean_fe_h_plot,
 if __name__ == '__main__':
     # Configuration
     config = configparser.ConfigParser()
-    base_dir = 'model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS'
+    base_dir = 'model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_HS'
     default_cfg = f'{base_dir}/default.cfg'
     config.read(default_cfg)
 
