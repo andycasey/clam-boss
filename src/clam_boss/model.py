@@ -748,7 +748,7 @@ def infer_labels(flux: np.ndarray,
             pred_flux = forward(params)
             total_var = var_jnp + scatter_sq
             chi_sq = (flux_jnp - pred_flux)**2 / total_var
-            return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
+            return 0.5 * jnp.sum(chi_sq)
 
         @jit
         def loss_and_grad(params):
