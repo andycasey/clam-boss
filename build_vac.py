@@ -10,10 +10,13 @@ import jax.nn as jnn
 
 from clam_boss.model import (
     compute_nmf_weights,
-    load_ridge_model_npz,
-    predict_with_ridge_npz,
     infer_labels,
     build_design_matrix_batch_jax
+)
+
+from clam_boss.init_model import (
+    load_ridge_model_npz,
+    predict_with_ridge_npz
 )
 
 

@@ -28,10 +28,13 @@ from clam_boss.utils import (
 from clam_boss.model import (
     joint_optimization,
     compute_nmf_weights,
+    infer_labels,
+)
+
+from clam_boss.init_model import (
     train_and_save_ridge_model,
     load_ridge_model_npz,
-    predict_with_ridge_npz,
-    infer_labels,
+    predict_with_ridge_npz
 )
 
 from clam_boss.plot import (

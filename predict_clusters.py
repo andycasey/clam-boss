@@ -4,9 +4,12 @@ import matplotlib.pyplot as plt
 
 from clam_boss.model import (
     compute_nmf_weights,
-    load_ridge_model_npz,
-    predict_with_ridge_npz,
     infer_labels,
+)
+
+from clam_boss.init_model import (
+    load_ridge_model_npz,
+    predict_with_ridge_npz
 )
 
 from clam_boss.plot import (
