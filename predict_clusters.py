@@ -9,7 +9,8 @@ from clam_boss.model import (
 
 from clam_boss.init_model import (
     load_ridge_model_npz,
-    predict_with_ridge_npz
+    predict_with_ridge_npz,
+    load_MLP_model
 )
 
 from clam_boss.plot import (
@@ -245,11 +246,10 @@ if __name__ == '__main__':
     scatter = res['scatter']
 
     # predict from ridge model
-    model_path = f'{save_dir}/nmf_ridge_model.npz'
+    model_path = f'{save_dir}/nmf_MLP_model.npz'
     W_vals = compute_nmf_weights(flux, H)
-    init_labels = predict_with_ridge_npz(
-        W_vals,
-        load_ridge_model_npz(model_path=model_path))
+    model = load_MLP_model(save_path=model_path)
+    init_labels = model.predict(W_vals)
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Infer labels using adam with decay schedule
@@ -257,27 +257,28 @@ if __name__ == '__main__':
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=1000,
+        n_iter=[500, 100],
         learning_rate=0.01,
-        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
-        optimizer='adam',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=500),
+        optimizer='two-stage',
         grid_points=None,
         grid_range=None,
+        batch_size_bfgs=len(flux)
     )
     # refine for hot stars
-    ev_hot = test_inferred_labels[:, 0] > 8000
-    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
-            flux[ev_hot], ivar[ev_hot],
-            theta, H, label_mean, label_std, scatter,
-            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
-            n_iter=1000,
-            learning_rate=0.01,
-            optimizer='bfgs',
-            grid_points=None,
-            grid_range=None,
-            logger=None,
-            batch_size_bfgs=np.sum(ev_hot),
-        )
+    # ev_hot = test_inferred_labels[:, 0] > 8000
+    # test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+    #         flux[ev_hot], ivar[ev_hot],
+    #         theta, H, label_mean, label_std, scatter,
+    #         init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+    #         n_iter=1000,
+    #         learning_rate=0.01,
+    #         optimizer='bfgs',
+    #         grid_points=None,
+    #         grid_range=None,
+    #         logger=None,
+    #         batch_size_bfgs=np.sum(ev_hot),
+    #     )
     
     # save the results
     np.savez(
@@ -382,11 +383,10 @@ if __name__ == '__main__':
     scatter = res['scatter']
 
     # predict from ridge model
-    model_path = f'{save_dir}/nmf_ridge_model.npz'
+    model_path = f'{save_dir}/nmf_MLP_model.npz'
     W_vals = compute_nmf_weights(flux, H)
-    init_labels = predict_with_ridge_npz(
-        W_vals,
-        load_ridge_model_npz(model_path=model_path))
+    model = load_MLP_model(save_path=model_path)
+    init_labels = model.predict(W_vals)
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Infer labels using adam with decay schedule
@@ -394,27 +394,28 @@ if __name__ == '__main__':
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=1000,
+        n_iter=[500, 100],
         learning_rate=0.01,
-        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
-        optimizer='adam',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=500),
+        optimizer='two-stage',
         grid_points=None,
         grid_range=None,
+        batch_size_bfgs=len(flux)
     )
     # refine for hot stars
-    ev_hot = test_inferred_labels[:, 0] > 8000
-    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
-            flux[ev_hot], ivar[ev_hot],
-            theta, H, label_mean, label_std, scatter,
-            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
-            n_iter=1000,
-            learning_rate=0.01,
-            optimizer='bfgs',
-            grid_points=None,
-            grid_range=None,
-            logger=None,
-            batch_size_bfgs=np.sum(ev_hot),
-        )
+    # ev_hot = test_inferred_labels[:, 0] > 8000
+    # test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+    #         flux[ev_hot], ivar[ev_hot],
+    #         theta, H, label_mean, label_std, scatter,
+    #         init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+    #         n_iter=1000,
+    #         learning_rate=0.01,
+    #         optimizer='bfgs',
+    #         grid_points=None,
+    #         grid_range=None,
+    #         logger=None,
+    #         batch_size_bfgs=np.sum(ev_hot),
+    #     )
 
     # save the results
     np.savez(
