@@ -132,8 +132,13 @@ if __name__ == '__main__':
 
     if add_MS:
         keep += (meta_data[:, -1] == 'minesweeper')
-        true_labels[meta_data[:, -1] == 'minesweeper', 2] -= -0.05  # apply offsets found in Vedant's paper
-        true_labels[meta_data[:, -1] == 'minesweeper', 3] -= 0.097  # subtract off median diff Peter found
+        z = np.array([-0.02042618, -0.09365971, -0.11915025])  # poly fit to difference from ASPCAP
+        p = np.poly1d(z)
+        ms_ev = meta_data[:, -1] == 'minesweeper'
+        fe_h_ev = true_labels[:, 2] > -1.5
+        true_labels[ms_ev & fe_h_ev, 2] -= p(true_labels[ms_ev & fe_h_ev, 2])
+        true_labels[ms_ev & ~fe_h_ev, 2] -= p(-1.5)
+        true_labels[ms_ev, 3] -= 0.106  # subtract off median diff found comparing aspcap and MS
     if add_WBs:
         keep += (meta_data[:, -1] == 'wide_binary')
     if add_HS:
@@ -149,6 +154,15 @@ if __name__ == '__main__':
     ivar = ivar[keep]
     true_labels = true_labels[keep]
     meta_data = meta_data[keep]
+
+    # remove metal poor nominal stars
+    remove = (meta_data[:, -1] == 'nominal') & (true_labels[:, 2] <= -1.5) & (true_labels[:, 1] < 3.5)
+    absorption = absorption[~remove]
+    flux = flux[~remove]
+    ivar = ivar[~remove]
+    true_labels = true_labels[~remove]
+    meta_data = meta_data[~remove]
+
     if remove_nans:  # combine data now if not doing EM
         # remove nans
         labels_mask = np.isfinite(true_labels)
