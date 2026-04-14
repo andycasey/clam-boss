@@ -355,6 +355,7 @@ if __name__ == '__main__':
         optimizer='two-stage',
         grid_points=None,
         grid_range=None,
+        batch_size_bfgs=10000,
         logger=logger
     )
 
