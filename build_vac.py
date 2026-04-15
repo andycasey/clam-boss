@@ -16,17 +16,15 @@ from clam_boss.model import (
 
 from clam_boss.init_model import (
     load_ridge_model_npz,
-    predict_with_ridge_npz
+    predict_with_ridge_npz,
+    load_MLP_model
 )
 
 
-def infer_chunk(base_dir, flux, ivar, theta, H, label_mean, label_std, scatter):
-    # predict from ridge model
-    model_path = f'{base_dir}/nmf_ridge_model.npz'
+def infer_chunk(base_dir, flux, ivar, theta, H, label_mean, label_std, scatter, mlp_model):
+    # predict from MLP
     W_vals = compute_nmf_weights(flux, H)
-    init_labels = predict_with_ridge_npz(
-        W_vals,
-        load_ridge_model_npz(model_path=model_path))
+    init_labels = mlp_model.predict(W_vals)
     init_labels_std = (init_labels - label_mean) / label_std
 
     # Infer labels using adam with decay schedule
@@ -34,27 +32,28 @@ def infer_chunk(base_dir, flux, ivar, theta, H, label_mean, label_std, scatter):
         flux, ivar,
         theta, H, label_mean, label_std, scatter,
         init_labels_std=init_labels_std,
-        n_iter=1000,
+        n_iter=[500, 100],
         learning_rate=0.01,
-        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=1000),
-        optimizer='adam',
+        schedule=optax.cosine_decay_schedule(init_value=0.01, decay_steps=500),
+        optimizer='two-stage',
         grid_points=None,
         grid_range=None,
+        batch_size_bfgs=20000
     )
     # refine for hot stars
-    ev_hot = test_inferred_labels[:, 0] > 8000
-    test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
-            flux[ev_hot], ivar[ev_hot],
-            theta, H, label_mean, label_std, scatter,
-            init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
-            n_iter=1000,
-            learning_rate=0.01,
-            optimizer='bfgs',
-            grid_points=None,
-            grid_range=None,
-            logger=None,
-            batch_size_bfgs=np.sum(ev_hot),
-        )
+    # ev_hot = test_inferred_labels[:, 0] > 8000
+    # test_inferred_labels[ev_hot], test_label_covariances[ev_hot] = infer_labels(
+    #         flux[ev_hot], ivar[ev_hot],
+    #         theta, H, label_mean, label_std, scatter,
+    #         init_labels_std=(test_inferred_labels[ev_hot] - label_mean) / label_std,
+    #         n_iter=1000,
+    #         learning_rate=0.01,
+    #         optimizer='bfgs',
+    #         grid_points=None,
+    #         grid_range=None,
+    #         logger=None,
+    #         batch_size_bfgs=np.sum(ev_hot),
+    #     )
     return test_inferred_labels, test_label_covariances
 
 
@@ -115,7 +114,8 @@ if __name__ == '__main__':
     save_dir = '/data/stassun/medani/SDSS-V_data/DR20_data'
 
     # create hdf5 file
-    with h5py.File(f'{save_dir}/dr20_clam_inferred_parameters_w_rchi2.h5', "w") as f:
+    save_hdf5_file = 'dr20_clam_inferred_parameters_w_rchi2_new_init.h5'
+    with h5py.File(f'{save_dir}/{save_hdf5_file}', "w") as f:
         f.create_dataset('inferred_labels',
                         shape=(n_stars, 4),
                         dtype='float64',
@@ -147,6 +147,10 @@ if __name__ == '__main__':
                         compression="gzip",
                         chunks=(25, n_wavelengths))
 
+    # load mlp for initial guess
+    model_path = f'{base_dir}/nmf_MLP_model.npz'
+    mlp_model = load_MLP_model(save_path=model_path)
+
     for i in tqdm(range(n_batches), desc="allstar batches"):
         start_idx = i * chunksize
         end_idx = min((i + 1) * chunksize, n_stars)
@@ -159,7 +163,7 @@ if __name__ == '__main__':
             rchi2_chunk = chunk_res['rchi2']
             model_flux_chunk = chunk_res['model_flux']
 
-            with h5py.File(f'{save_dir}/dr20_clam_inferred_parameters_w_rchi2.h5', "a") as f:
+            with h5py.File(f'{save_dir}/{save_hdf5_file}', "a") as f:
                 f['inferred_labels'][start_idx:end_idx] = inferred_labels_chunk
                 f['label_covariances'][start_idx:end_idx] = label_covariances_chunk
                 f['sdss_id'][start_idx:end_idx] = allstar['sdss_id'][idx_chunk]
@@ -189,7 +193,7 @@ if __name__ == '__main__':
             norm_ivar = np.where(bad_pixels, 0.0, norm_ivar)
 
             inferred_labels_chunk, label_covariances_chunk = infer_chunk(
-                base_dir, norm_flux, norm_ivar, theta, H, label_mean, label_std, scatter)
+                base_dir, norm_flux, norm_ivar, theta, H, label_mean, label_std, scatter, mlp_model)
 
             flux_jnp = jnp.array(norm_flux)
             var_jnp = 1.0 / jnp.maximum(norm_ivar, 1e-16)
@@ -201,7 +205,7 @@ if __name__ == '__main__':
             rchi2_chunk = np.array(rchi2_res)
             model_flux_chunk = np.array(pred_flux_res, dtype='float32')
 
-            with h5py.File(f'{save_dir}/dr20_clam_inferred_parameters_w_rchi2.h5', "a") as f:
+            with h5py.File(f'{save_dir}/{save_hdf5_file}', "a") as f:
                 f['inferred_labels'][start_idx:end_idx] = inferred_labels_chunk
                 f['label_covariances'][start_idx:end_idx] = label_covariances_chunk
                 f['sdss_id'][start_idx:end_idx] = allstar['sdss_id'][idx_chunk]
