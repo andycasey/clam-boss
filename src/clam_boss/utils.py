@@ -50,6 +50,8 @@ def load_data(file_path, convert_alpha=True):
         ])
     
     meta_data = np.column_stack([
+            data['bp_mag'],
+            data['rp_mag'],
             data['sdss_id'],
             data['telescope'],
             data['snr'],

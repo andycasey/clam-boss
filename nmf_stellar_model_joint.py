@@ -66,6 +66,10 @@ if __name__ == '__main__':
     add_WBs = config.getboolean('settings', 'add_WBs')
     add_MS = config.getboolean('settings', 'add_MS')
     add_HS = config.getboolean('settings', 'add_HS')
+    try:
+        add_slam = config.getboolean('settings', 'add_slam')
+    except:
+        add_slam = False
     remove_nans = config.getboolean('settings', 'remove_nans')
     train_w_subsample = config.getboolean('settings', 'train_w_subsample')
 
@@ -85,12 +89,17 @@ if __name__ == '__main__':
     else:
         append_hs = ''
 
+    if add_slam:
+        append_slam = '_w_SLAM'
+    else:
+        append_slam = ''
+
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
-        output_dir = f'model_results/nmf_joint_results_with_scatter_K32{append_wb}{append_ms}{append_hs}'
+        output_dir = f'model_results/nmf_joint_results_with_scatter_K32{append_wb}{append_ms}{append_hs}{append_slam}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
-        output_dir = f'model_results/nmf_joint_results_with_scatter_K32_alpha_m{append_wb}{append_ms}{append_hs}'
+        output_dir = f'model_results/nmf_joint_results_with_scatter_K32_alpha_m{append_wb}{append_ms}{append_hs}{append_slam}'
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -121,6 +130,7 @@ if __name__ == '__main__':
     logger.info(f"  Adding Wide Binaries = {add_WBs}")
     logger.info(f"  Adding Mineweeper = {add_MS}")
     logger.info(f"  Adding Hot Stars = {add_HS}")
+    logger.info(f"  Adding SLAM = {add_slam}")
     logger.info(f"  Training set subsampled = {train_w_subsample}")
     logger.info(f"  Removing naned labels = {remove_nans}")
 
@@ -143,6 +153,8 @@ if __name__ == '__main__':
         true_labels[ms_ev, 3] -= 0.106  # subtract off median diff found comparing aspcap and MS
     if add_WBs:
         keep += (meta_data[:, -1] == 'wide_binary')
+    if add_slam:
+        keep += (meta_data[:, -1] == 'slam')
     if add_HS:
         # load HSs, append later
         hs = meta_data[:, -1] == 'hot_stars'
@@ -159,6 +171,17 @@ if __name__ == '__main__':
 
     # remove metal poor nominal stars
     remove = (meta_data[:, -1] == 'nominal') & (true_labels[:, 2] <= -1.5) & (true_labels[:, 1] < 3.5)
+    absorption = absorption[~remove]
+    flux = flux[~remove]
+    ivar = ivar[~remove]
+    true_labels = true_labels[~remove]
+    meta_data = meta_data[~remove]
+
+    # remove slam stars bad teff
+    bp_rp = meta_data[:, 0].astype(float) - meta_data[:, 1].astype(float)
+    m = -50.
+    b = 3980 - m * 1.5
+    remove = (meta_data[:, -1] == 'slam') & (true_labels[:, 0] > m * bp_rp + b)
     absorption = absorption[~remove]
     flux = flux[~remove]
     ivar = ivar[~remove]
@@ -182,7 +205,14 @@ if __name__ == '__main__':
     logger.info("\n[2/4] Running joint optimization...")
     # get training subsample
     if train_w_subsample:
-        if add_MS:
+        if add_slam:
+            nbins = 40
+            nstars_per_bin = 10
+            ranges = [[2800, 6500],
+                      [1, 5.25],
+                      [-0.1, 0.5]]
+            bins_use = [0, 1, 3]
+        elif add_MS:
             nbins = 40
             nstars_per_bin = 7
             ranges = [[2800, 6500],
@@ -413,7 +443,7 @@ if __name__ == '__main__':
                   convert_alpha)
 
     # now do each plot individually for each type
-    data_types = ['nominal', 'minesweeper', 'wide_binary', 'hot_stars']
+    data_types = np.unique(meta_data[:, -1]).tolist()
     for dt in data_types:
         ev = (meta_data[:, -1] == dt)
         if np.sum(ev) > 0:

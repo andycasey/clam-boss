@@ -178,7 +178,7 @@ def plot_compare_clusers(mean_fe_h_plot,
 if __name__ == '__main__':
     # Configuration
     config = configparser.ConfigParser()
-    base_dir = 'model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS'
+    base_dir = 'model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_MS_w_HS_w_SLAM'
     default_cfg = f'{base_dir}/default.cfg'
     config.read(default_cfg)
 
@@ -190,6 +190,10 @@ if __name__ == '__main__':
     add_WBs = config.getboolean('settings', 'add_WBs')
     add_MS = config.getboolean('settings', 'add_MS')
     add_HS = config.getboolean('settings', 'add_HS')
+    try:
+        add_slam = config.getboolean('settings', 'add_slam')
+    except:
+        add_slam = False
     remove_nans = config.getboolean('settings', 'remove_nans')
     train_w_subsample = config.getboolean('settings', 'train_w_subsample')
 
@@ -209,6 +213,11 @@ if __name__ == '__main__':
     else:
         append_hs = ''
 
+    if add_slam:
+        append_slam = '_w_SLAM'
+    else:
+        append_slam = ''
+
     # do open clusters first
     open_clusters = True
     if open_clusters:
@@ -221,11 +230,11 @@ if __name__ == '__main__':
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
         save_dir = base_dir
-        output_dir = f'validation_results/{dir_start}_{append_wb}{append_ms}{append_hs}'
+        output_dir = f'validation_results/{dir_start}_{append_wb}{append_ms}{append_hs}{append_slam}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
         save_dir = base_dir
-        output_dir = f'validation_results/{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}'
+        output_dir = f'validation_results/{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}{append_slam}'
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -359,11 +368,11 @@ if __name__ == '__main__':
     if convert_alpha:
         label_names = ['teff', 'logg', 'm_h', 'alpha_h']
         save_dir = base_dir
-        output_dir = f'validation_results/{dir_start}_{append_wb}{append_ms}{append_hs}'
+        output_dir = f'validation_results/{dir_start}_{append_wb}{append_ms}{append_hs}{append_slam}'
     else:
         label_names = ['teff', 'logg', 'm_h', 'alpha_m']
         save_dir = base_dir
-        output_dir = f'validation_results/{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}'
+        output_dir = f'validation_results/{dir_start}_alpha_m{append_wb}{append_ms}{append_hs}{append_slam}'
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     print(f"Saving results to: {output_dir}/")
