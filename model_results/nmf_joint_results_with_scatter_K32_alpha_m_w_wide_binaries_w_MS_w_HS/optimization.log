@@ -667,3 +667,79 @@ Generating test comparison plot...
 INFO - Saved test results to model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/test_inference_results.npz
 INFO - 
 Done!
+INFO - Saving results to: model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/
+INFO - ============================================================
+INFO - Joint NMF Stellar Spectra Model
+INFO - ============================================================
+INFO - Configuration:
+INFO -   K = 160 components
+INFO -   Iterations = 10000
+INFO -   Learning rate = 0.001
+INFO -   Converting Alpha = False
+INFO -   Adding Wide Binaries = True
+INFO -   Adding Mineweeper = True
+INFO -   Adding Hot Stars = True
+INFO -   Training set subsampled = True
+INFO -   Removing naned labels = True
+INFO - 
+[1/4] Loading data...
+INFO -   Loaded 63525 stars with 4648 wavelength pixels
+INFO - 
+[2/4] Running joint optimization...
+INFO - Joint optimization setup:
+INFO -   Stars: 40547, Wavelengths: 4648
+INFO -   K = 160 components
+INFO -   Design matrix features: 15
+INFO -   Total parameters: 908,268
+INFO - Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+INFO -   Initial loss: 1.492460e+00
+INFO - 
+Optimizing for 10000 iterations...
+INFO -   Final loss: -1.804214e+00
+INFO - 
+[3/4] Computing statistics...
+INFO - 
+============================================================
+INFO - Summary Statistics (Training Set)
+INFO - ============================================================
+INFO -   teff    : bias=-0.9449, scatter=118.8845, MAD=57.6886
+INFO -   logg    : bias=-0.0055, scatter=0.1036, MAD=0.0392
+INFO -   m_h     : bias=-0.0040, scatter=0.0888, MAD=0.0469
+INFO -   alpha_m : bias=+0.0001, scatter=0.0126, MAD=0.0032
+INFO - 
+[4/4] Generating plots...
+INFO - 
+Saving results...
+INFO -   Saved to model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/
+INFO - 
+============================================================
+INFO - Test Step: Inferring labels from spectra (no known labels)
+INFO - ============================================================
+INFO - Test set: 64151 spectra
+INFO - Inferring labels using trained model (theta, H fixed)...
+INFO - "Training MLP to use as initial guesser...
+INFO - 
+Model saved to model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/nmf_MLP_model.npz
+INFO - 
+============================================================
+INFO - Summary Statistics (MLP)
+INFO - ============================================================
+INFO -   teff    : bias=+4.7974, scatter=312.4438, MAD=107.6696
+INFO -   logg    : bias=+0.0099, scatter=0.2420, MAD=0.1199
+INFO -   m_h     : bias=+0.0053, scatter=0.1294, MAD=0.0674
+INFO -   alpha_m : bias=-0.0019, scatter=0.0648, MAD=0.0305
+INFO - Inferring labels for 64151 stars using TWO-STAGE...
+INFO -   Running L-BFGS-B optimization (GPU-accelerated)...
+INFO - 
+============================================================
+INFO - Test Set Statistics
+INFO - ============================================================
+INFO -   teff    : bias=-10.9464, scatter=277.5863, MAD=75.7567
+INFO -   logg    : bias=-0.0231, scatter=0.2999, MAD=0.1458
+INFO -   m_h     : bias=-0.0148, scatter=0.1471, MAD=0.0724
+INFO -   alpha_m : bias=+0.0064, scatter=0.1111, MAD=0.0480
+INFO - 
+Generating test comparison plot...
+INFO - Saved test results to model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/test_inference_results.npz
+INFO - 
+Done!
