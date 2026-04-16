@@ -734,7 +734,7 @@ def infer_labels(flux: np.ndarray,
         params = {'labels_std': jnp.array(init_labels_std)}
 
         @jit
-        def forward(params):
+        def forward(params, theta_jnp, H_jnp):
             """Compute predicted flux from labels."""
             labels_std = params['labels_std']
             design_matrix = build_design_matrix_batch_jax(labels_std)
@@ -743,16 +743,18 @@ def infer_labels(flux: np.ndarray,
             return pred_flux
 
         @jit
-        def loss_fn(params):
+        def loss_fn(params, theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq):
             """Compute weighted reconstruction loss."""
-            pred_flux = forward(params)
+            pred_flux = forward(params, theta_jnp, H_jnp)
             total_var = var_jnp + scatter_sq
             chi_sq = (flux_jnp - pred_flux)**2 / total_var
             return 0.5 * jnp.sum(chi_sq) / (n_stars * n_wavelengths)
 
         @jit
-        def loss_and_grad(params):
-            return jax.value_and_grad(loss_fn)(params)
+        def loss_and_grad(params, theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq):
+            return jax.value_and_grad(loss_fn)(
+                params, theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq
+    )
 
         if schedule is not None:
             opt = optax.adam(schedule)
@@ -761,10 +763,16 @@ def infer_labels(flux: np.ndarray,
         opt_state = opt.init(params)
 
         @jit
-        def update_step(params, opt_state):
-            loss, grads = loss_and_grad(params)
+        def update_step(params, opt_state,
+                        theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq):
+            
+            loss, grads = loss_and_grad(
+                params, theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq
+            )
+            
             updates, opt_state = opt.update(grads, opt_state, params)
             params = optax.apply_updates(params, updates)
+            
             return params, opt_state, loss
 
         if optimizer == 'adam':
@@ -773,7 +781,10 @@ def infer_labels(flux: np.ndarray,
             n_iteri = n_iter[0]
         with tqdm(total=n_iteri) as pb:
             for i in range(n_iteri):
-                params, opt_state, loss = update_step(params, opt_state)
+                params, opt_state, loss = update_step(
+                    params, opt_state,
+                    theta_jnp, H_jnp, flux_jnp, var_jnp, scatter_sq
+                )
                 pb.set_description(f"loss = {float(loss):.4e}")
                 pb.update()
 
