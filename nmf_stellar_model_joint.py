@@ -308,20 +308,20 @@ if __name__ == '__main__':
 
     # Save results
     logger.info("\nSaving results...")
-    np.savez(f'{output_dir}/joint_model_results.npz',
-             inferred_labels=inferred_labels,
-             true_labels=true_labels,
-             meta_data=meta_data,
-             idx_train=idx_train,
-             theta=theta,
-             H=H,
-             W=W,
-             label_mean=label_mean,
-             label_std=label_std,
-             losses=losses,
-             scatter=scatter,
-             stats=stats,
-             convert_alpha=convert_alpha)
+    np.savez_compressed(f'{output_dir}/joint_model_results.npz',
+                        inferred_labels=inferred_labels,
+                        true_labels=true_labels,
+                        meta_data=meta_data,
+                        idx_train=idx_train,
+                        theta=theta,
+                        H=H,
+                        W=W,
+                        label_mean=label_mean,
+                        label_std=label_std,
+                        losses=losses,
+                        scatter=scatter,
+                        stats=stats,
+                        convert_alpha=convert_alpha)
 
     logger.info(f"  Saved to {output_dir}/")
 
@@ -506,12 +506,12 @@ if __name__ == '__main__':
                               feh_min=fe_h_perc)
 
     # Save test results
-    np.savez(f'{output_dir}/test_inference_results.npz',
-             test_true_labels=test_true_labels,
-             test_inferred_labels=test_inferred_labels,
-             test_label_covariances=test_label_covariances,
-             meta_data=meta_data,
-             test_stats=test_stats)
+    np.savez_compressed(f'{output_dir}/test_inference_results.npz',
+                        test_true_labels=test_true_labels,
+                        test_inferred_labels=test_inferred_labels,
+                        test_label_covariances=test_label_covariances,
+                        meta_data=meta_data,
+                        test_stats=test_stats)
     logger.info(f"Saved test results to {output_dir}/test_inference_results.npz")
 
     logger.info("\nDone!")
