@@ -1,0 +1,1 @@
+{"mlp": {"hidden_layer_sizes": [512, 256, 128, 64], "activation": "tanh", "n_layers": 5, "input_dim": 160, "output_dim": 4}, "shapes": {"coefs": [[160, 512], [512, 256], [256, 128], [128, 64], [64, 4]], "intercepts": [[512], [256], [128], [64], [4]]}}
