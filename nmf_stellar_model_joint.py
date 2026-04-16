@@ -196,7 +196,7 @@ if __name__ == '__main__':
     if train_w_subsample:
         if add_slam:
             nbins = 40
-            nstars_per_bin = 10
+            nstars_per_bin = 7
             ranges = [[2800, 6500],
                       [1, 5.25],
                       [-0.1, 0.5]]
