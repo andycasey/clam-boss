@@ -349,9 +349,11 @@ if __name__ == '__main__':
     if add_WBs:
         mask = labels_mask[idx_train]
         labels_ridge[~mask] = inferred_labels[~mask]
+    # make sure no nans
+    mlp_mask = np.all(np.isfinite(labels_ridge), axis=1)
     W_train = compute_nmf_weights(flux[idx_train], H)
     model_path = f'{output_dir}/nmf_MLP_model.npz'
-    train_and_save_MLP(W_train, labels_ridge,
+    train_and_save_MLP(W_train[mlp_mask], labels_ridge[mlp_mask],
                        save_path=model_path,
                        logger=logger)
     # predict from this model
