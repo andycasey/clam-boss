@@ -177,17 +177,6 @@ if __name__ == '__main__':
     true_labels = true_labels[~remove]
     meta_data = meta_data[~remove]
 
-    # remove slam stars bad teff
-    bp_rp = meta_data[:, 0].astype(float) - meta_data[:, 1].astype(float)
-    m = -50.
-    b = 3980 - m * 1.5
-    remove = (meta_data[:, -1] == 'slam') & (true_labels[:, 0] > m * bp_rp + b)
-    absorption = absorption[~remove]
-    flux = flux[~remove]
-    ivar = ivar[~remove]
-    true_labels = true_labels[~remove]
-    meta_data = meta_data[~remove]
-
     if remove_nans:  # combine data now if not doing EM
         # remove nans
         labels_mask = np.isfinite(true_labels)
