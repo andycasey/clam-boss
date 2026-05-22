@@ -116,6 +116,63 @@ inferred_labels, label_covariances = infer_labels(
 )
 ```
 
+## Example Training a Model
+
+The code can also be used to train your own model. This example assumes that you have four arrays: `flux`, `ivar` and `continuum` of shape `[N, M]`, where `N` is the number of stars and `M` is the length of the wavelength axis, and `true_labels` of shape `[N, L]`, where `L` is the number of stellar labels per star. Spectra should be resampled to the stellar rest frame.
+```python
+import numpy as np
+from clam_boss.model import joint_optimization
+
+# normalize spectrum
+norm_flux = flux / continuum
+
+# Compute inverse variance for normalized flux
+norm_ivar = continuum**2 * ivar
+
+# Handle non-finite values
+bad_pixels = (
+    ~np.isfinite(norm_flux)
+|   ~np.isfinite(norm_ivar)
+|   (norm_ivar <= 0)
+|   (norm_flux <= 0)
+|   (norm_flux >= 1.2)
+)
+
+norm_flux = np.where(bad_pixels, 1.0, norm_flux)
+norm_ivar = np.where(bad_pixels, 0.0, norm_ivar)
+
+# assume weights equal for all labels
+per_label_weights = np.zeros_like(true_labels) + 1.
+
+# train the model
+
+K = 160  # number of basis vectors for NMF
+n_iter = 10_000  # number of iterations for optimization
+learning_rate = 0.001  # learning rate for adam
+print_every = 1000  # how often to print loss in optimization
+
+inferred_labels, theta, H, W, label_mean, label_std, losses, scatter = joint_optimization(
+        norm_flux, norm_ivar, true_labels, K,
+        n_iter=n_iter,
+        learning_rate=learning_rate,
+        print_every=print_every,
+        seed=42,
+        per_label_weights=per_label_weights
+    )
+
+# Save results
+np.savez_compressed(f'joint_model_results.npz',
+                    inferred_labels=inferred_labels,
+                    true_labels=true_labels,
+                    theta=theta,
+                    H=H,
+                    W=W,
+                    label_mean=label_mean,
+                    label_std=label_std,
+                    losses=losses,
+                    scatter=scatter)
+```
+
 ## Scripts and Plots Included
 
 The respiratory also includes the scripts and validation plots for the SDSS-V DR20 BOSS-CLAM value added catalog (Medan et al.):
