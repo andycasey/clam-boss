@@ -1,8 +1,8 @@
 # BOSS-CLAM
 
-The CLAM (Constrained Linear Absorption Model) is a constrained linear absorption model that simultaneously fits stellar absorption and continuum via non-negative matrix factorization [(Casey et al. 2026)](https://ui.adsabs.harvard.edu/abs/2026ApJ...998..192C/abstract). This respotory is for the implmementation of a similar method dubbed ``BOSS-CLAM". BOSS-CLAM seeks to decompose stellar spectra using non-negative matrix factorization (NMF). In this method though, we will optimize a mapping between the NMF weights and stellar labels. Once the model is trained, this allows us to infer stellar labels from observed spectra.
+The CLAM (Constrained Linear Absorption Model) is a constrained linear absorption model that simultaneously fits stellar absorption and continuum via non-negative matrix factorization [(Casey et al. 2026)](https://ui.adsabs.harvard.edu/abs/2026ApJ...998..192C/abstract). This repository is for the implementation of a similar method dubbed ``BOSS-CLAM". BOSS-CLAM seeks to decompose stellar spectra using non-negative matrix factorization (NMF). In this method though, we will optimize a mapping between the NMF weights and stellar labels. Once the model is trained, this allows us to infer stellar labels from observed spectra.
 
-This respository is for the BOSS-CLAM model trained on SDSS-V BOSS spectra from DR20 (Medan et al.). This repository hosts the code to train a BOSS-CLAM model, the trained model on DR20 data, and some validation plots using open and globular clusters.
+This repository is for the BOSS-CLAM model trained on SDSS-V BOSS spectra from DR20 (Medan et al.). This repository hosts the code to train a BOSS-CLAM model, the trained model on DR20 data, and some validation plots using open and globular clusters.
 
 ## Installation
 
@@ -16,7 +16,7 @@ uv sync
 ```
 The code is built on [JAX](https://docs.jax.dev/en/latest/). If you want to run the code on a GPU, then instead sync the repository with: `uv sync --extra gpu`.
 
-## Example Loading the DR20 Model
+## Example Loading and Using the Trained DR20 Model
 
 This repository can be used to load the trained DR20 model and either fit infer parameters from your own BOSS spectra or forward model spectra from arbitrary stellar parameters. The DR20 model is loaded like:
 ```python
@@ -73,7 +73,7 @@ pred_flux = spectra_predict(labels_std, theta_jnp, H_jnp, scatter_sq)
 
 ### Infer Parameters for BOSS Spectra
 
-The model can also be used to infer the stellar parameters of a BOSS spectra. This assumes that you have three arrays, `flux`, `ivar` and `continuum` of shape `[N, 4648]`, where `N` is the number of stars:
+The model can also be used to infer the stellar parameters of BOSS spectrum. This assumes that you have three arrays, `flux`, `ivar` and `continuum` of shape `[N, 4648]`, where `N` is the number of stars. Spectra should be resampled to the stellar rest frame.
 ```python
 # normalize spectrum
 norm_flux = flux / continuum
@@ -115,3 +115,11 @@ inferred_labels, label_covariances = infer_labels(
     batch_size_bfgs=len(norm_flux)
 )
 ```
+
+## Scripts and Plots Included
+
+The respiratory also includes the scripts and validation plots for the SDSS-V DR20 BOSS-CLAM value added catalog (Medan et al.):
+- [`nmf_stellar_model_joint.py`](https://github.com/andycasey/clam-boss/blob/main/nmf_stellar_model_joint.py): The main script used to train the DR20 model.
+- [`model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS/`](https://github.com/andycasey/clam-boss/tree/main/model_results/nmf_joint_results_with_scatter_K32_alpha_m_w_wide_binaries_w_MS_w_HS): The directory that includes the trained DR20 model and some results plots from the training.
+- [`predict_clusters.py`](https://github.com/andycasey/clam-boss/blob/main/predict_clusters.py): Script to infer parameters of open and globular clusters for validating the model.
+- [`validation_results/`](https://github.com/andycasey/clam-boss/tree/main/validation_results): Validation plots for the open and globular clusters.
