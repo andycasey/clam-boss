@@ -16,7 +16,7 @@ uv sync
 ```
 The code is built on [JAX](https://docs.jax.dev/en/latest/). If you want to run the code on a GPU, then instead sync the repository with: `uv sync --extra gpu`.
 
-## Example -- Loading and Using the Trained DR20 Model
+## Example - Loading and Using the Trained DR20 Model
 
 This repository can be used to load the trained DR20 model and either fit infer parameters from your own BOSS spectra or forward model spectra from arbitrary stellar parameters. The DR20 model is loaded like:
 ```python
@@ -116,7 +116,7 @@ inferred_labels, label_covariances = infer_labels(
 )
 ```
 
-## Example -- Training a Model
+## Example - Training a Model
 
 The code can also be used to train your own model. This example assumes that you have four arrays: `flux`, `ivar` and `continuum` of shape `[N, M]`, where `N` is the number of stars and `M` is the length of the wavelength axis, and `true_labels` of shape `[N, L]`, where `L` is the number of stellar labels per star. Spectra should be resampled to the stellar rest frame.
 ```python
