@@ -1,6 +1,6 @@
 # BOSS-CLAM
 
-The CLAM (Constrained Linear Absorption Model) is a constrained linear absorption model that simultaneously fits stellar absorption and continuum via non-negative matrix factorization [(Casey et al. 2026)](https://ui.adsabs.harvard.edu/abs/2026ApJ...998..192C/abstract). This repository is for the implementation of a similar method dubbed ``BOSS-CLAM". BOSS-CLAM seeks to decompose stellar spectra using non-negative matrix factorization (NMF). In this method though, we will optimize a mapping between the NMF weights and stellar labels. Once the model is trained, this allows us to infer stellar labels from observed spectra.
+The CLAM (Constrained Linear Absorption Model) is a constrained linear absorption model that simultaneously fits stellar absorption and continuum via non-negative matrix factorization [(Casey et al. 2026)](https://ui.adsabs.harvard.edu/abs/2026ApJ...998..192C/abstract). This repository is for the implementation of a similar method dubbed "BOSS-CLAM". BOSS-CLAM seeks to decompose stellar spectra using non-negative matrix factorization (NMF). In this method though, we will optimize a mapping between the NMF weights and stellar labels. Once the model is trained, this allows us to infer stellar labels from observed spectra.
 
 This repository is for the BOSS-CLAM model trained on SDSS-V BOSS spectra from DR20 (Medan et al.). This repository hosts the code to train a BOSS-CLAM model, the trained model on DR20 data, and some validation plots using open and globular clusters.
 
@@ -16,7 +16,7 @@ uv sync
 ```
 The code is built on [JAX](https://docs.jax.dev/en/latest/). If you want to run the code on a GPU, then instead sync the repository with: `uv sync --extra gpu`.
 
-## Example Loading and Using the Trained DR20 Model
+## Example --- Loading and Using the Trained DR20 Model
 
 This repository can be used to load the trained DR20 model and either fit infer parameters from your own BOSS spectra or forward model spectra from arbitrary stellar parameters. The DR20 model is loaded like:
 ```python
@@ -116,7 +116,7 @@ inferred_labels, label_covariances = infer_labels(
 )
 ```
 
-## Example Training a Model
+## Example --- Training a Model
 
 The code can also be used to train your own model. This example assumes that you have four arrays: `flux`, `ivar` and `continuum` of shape `[N, M]`, where `N` is the number of stars and `M` is the length of the wavelength axis, and `true_labels` of shape `[N, L]`, where `L` is the number of stellar labels per star. Spectra should be resampled to the stellar rest frame.
 ```python
