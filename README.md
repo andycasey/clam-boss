@@ -73,7 +73,7 @@ pred_flux = spectra_predict(labels_std, theta_jnp, H_jnp, scatter_sq)
 
 ### Infer Parameters for BOSS Spectra
 
-The model can also be used to infer the stellar parameters of BOSS spectrum. This assumes that you have three arrays, `flux`, `ivar` and `continuum` of shape `[N, 4648]`, where `N` is the number of stars. Spectra should be resampled to the stellar rest frame.
+The model can also be used to infer the stellar parameters of BOSS spectra. This assumes that you have three arrays, `flux`, `ivar` and `continuum` of shape `[N, 4648]`, where `N` is the number of stars. Spectra should be resampled to the stellar rest frame.
 ```python
 # normalize spectrum
 norm_flux = flux / continuum
